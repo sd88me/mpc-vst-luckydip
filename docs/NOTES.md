@@ -30,8 +30,13 @@ project save/reload, export loading in the Force's browser.
 - Reject does not reroll the pad by itself (as in the web UI); press Reroll.
 - Pads are one-shots (note-off ignored), one voice per pad, retrigger restarts. At most 15 s per pad is held in memory.
 - The web UI's folder pickers have no equivalent in a plugin (no text entry or file browser in a skin). The SETTINGS
-  page has Source and Export steppers over folders discovered on the cards (scanner thread), saved in the chunk;
-  `luckydip.conf` still sets what "Default" means.
+  page has two-level steppers (Folder, then Inside, with +-10 skips) for the source and the export folder, over folders
+  discovered on the scanner thread, saved in the chunk; `luckydip.conf` still sets what "Default" means. Flat lists
+  were too long (every Expansions pack).
+- Export "Link to originals" = symlinks beside the `.xpm`. Real Force `.xpm` files leave `<SampleFile>` empty and the
+  MPC finds samples by name beside the file, so a path in `<SampleFile>` was not tried. **Untested on hardware: whether
+  the MPC browser/loader follows symlinks.** Copy mode is the verified path.
+- Skip Loops and Max File Size are settings (state + conf defaults), applied on Rescan.
 - The scan classifies with the root folder's own name as a folder component (the JS only saw names below a root), so a
   chosen `Kicks` folder classifies as kick. Exported `LuckyDip-*` folders are skipped when scanning.
 - A scan request while one of this instance's scans runs is queued (a project load sets the saved source right after

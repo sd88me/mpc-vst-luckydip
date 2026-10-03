@@ -175,7 +175,45 @@ std::string short_name(const std::string &path, size_t max) {
     return b;
 }
 
-struct Job { enum Type { LOAD, EXPORT } type; int pad; std::string path; Pad pads[NPADS]; std::string dir, name; };
+const int SIZE_MB[] = {0, 1, 2, 5, 10, 20};
+const int NSIZES = 6;
+
+/* A folder choice in two levels: a location (0 = "Default (auto)", then the folders directly under each card) and,
+ * inside it, one subfolder (0 = the whole location), so a long list of packs is never one flat stepper. */
+struct FolderSel {
+    std::vector<std::string> locs;                 /* [0] = "" */
+    std::vector<std::vector<std::string> > subs;   /* subs[i][0] = "" (whole location) */
+    int loc = 0, sub = 0;
+    FolderSel() { locs.assign(1, std::string()); subs.assign(1, std::vector<std::string>(1, std::string())); }
+    std::string path() const {
+        if (loc <= 0) return std::string();
+        return sub > 0 ? subs[loc][sub] : locs[loc];
+    }
+    void set_path(const std::string &p) {
+        loc = sub = 0;
+        if (p.empty()) return;
+        for (size_t i = 1; i < locs.size(); i++) {
+            if (locs[i] == p) { loc = (int)i; return; }
+            if (p.compare(0, locs[i].size() + 1, locs[i] + "/") == 0) {
+                std::vector<std::string> &v = subs[i];
+                size_t k = 0;
+                while (k < v.size() && v[k] != p) k++;
+                if (k == v.size()) v.push_back(p);
+                loc = (int)i; sub = (int)k;
+                return;
+            }
+        }
+        locs.push_back(p); subs.push_back(std::vector<std::string>(1, std::string()));   /* a path from luckydip.conf, not found on the cards */
+        loc = (int)locs.size() - 1;
+    }
+    void step_loc(int d) { int n = (int)locs.size(); loc = ((loc + d) % n + n) % n; sub = 0; }
+    void step_sub(int d) {
+        int n = (int)subs[loc].size();
+        sub = n <= 1 ? 0 : std::max(0, std::min(n - 1, sub + d));        /* no wrap: a long list has ends */
+    }
+};
+
+struct Job { enum Type { LOAD, EXPORT } type; int pad; std::string path; Pad pads[NPADS]; std::string dir, name; bool link = false; };
 
 struct Retired { Pcm *p; std::chrono::steady_clock::time_point at; };
 
@@ -185,8 +223,9 @@ struct Inst {
     std::string sig, cache_path;
     std::vector<std::string> def_roots;                 /* the conf / card-layout defaults (source "Default") */
     std::string def_export;
-    std::vector<std::string> src_list, exp_list;        /* index 0 = default (""), then folders found on the cards */
-    int src_i = 0, exp_i = 0;
+    FolderSel src, exp;                                 /* the two folder choices on the SETTINGS page */
+    bool link_samples = false;                          /* export: symlink the samples instead of copying them */
+    int size_idx = 0;                                   /* index into SIZE_MB */
 
     std::mutex mu;                   /* pads[], status, export_name, sel, dup */
     Pad pads[NPADS];
@@ -273,7 +312,7 @@ struct Inst {
         loaded[j.pad] = 1;
     }
     void do_export(const Job &j) {
-        ExportResult r = export_xpm(j.dir, j.name, j.pads);
+        ExportResult r = export_xpm(j.dir, j.name, j.pads, j.link);
         std::lock_guard<std::mutex> l(mu);
         if (r.ok) { export_name = j.name; status = r.warnings.empty() ? "Exported OK" : "Exported (see log)"; }
         else status = "Export failed";
@@ -291,48 +330,46 @@ struct Inst {
         std::sort(n.begin(), n.end());
         for (size_t i = 0; i < n.size(); i++) if (is_dir(d + "/" + n[i])) out.push_back(d + "/" + n[i]);
     }
-    /* what a person might pick: the folders directly under each card, each pack inside an Expansions folder, and
-     * the top level of /sdcard (not the plugin and backup folders) */
-    std::vector<std::string> discover_dirs() {
-        std::vector<std::string> d;
+    /* what a person might pick: the folders directly under each card and the top level of /sdcard, each with its own
+     * subfolders (so each pack inside Expansions is a second-level choice, not one more step in a flat list) */
+    static void discover_dirs(std::vector<std::string> &locs, std::vector<std::vector<std::string> > &subs) {
+        std::vector<std::string> top;
         std::vector<std::string> cards;
         subdirs("/media", cards);
         for (size_t c = 0; c < cards.size(); c++) {
             std::string nm = base_name(cards[c]);
             if (nm == "acvs-synths" || nm == "az01-internal") continue;     /* system mounts, not sample cards */
-            std::vector<std::string> top;
             subdirs(cards[c], top);
-            for (size_t i = 0; i < top.size(); i++) {
-                d.push_back(top[i]);
-                if (base_name(top[i]) == "Expansions") subdirs(top[i], d);
-            }
         }
         std::vector<std::string> sd;
         subdirs("/sdcard", sd);
         for (size_t i = 0; i < sd.size(); i++) {
             std::string nm = base_name(sd[i]);
-            if (nm != "Synths" && nm != "MPC-backup") d.push_back(sd[i]);
+            if (nm != "Synths" && nm != "MPC-backup") top.push_back(sd[i]);
         }
-        if (d.size() > 400) d.resize(400);
-        return d;
+        locs.assign(1, std::string()); subs.assign(1, std::vector<std::string>(1, std::string()));
+        for (size_t i = 0; i < top.size() && i < 60; i++) {
+            locs.push_back(top[i]);
+            std::vector<std::string> v(1, std::string());
+            std::vector<std::string> kids;
+            subdirs(top[i], kids);
+            if (kids.size() > 500) kids.resize(500);
+            v.insert(v.end(), kids.begin(), kids.end());
+            subs.push_back(v);
+        }
     }
     /* run on the scanner thread (it walks directories): installs the lists, keeping the folders already chosen */
-    void install_folder_lists(const std::vector<std::string> &d) {
+    void install_folder_lists(const std::vector<std::string> &locs, const std::vector<std::vector<std::string> > &subs) {
         std::lock_guard<std::mutex> l(mu);
-        std::string cs = src_list[src_i], ce = exp_list[exp_i];
-        src_list.assign(1, std::string()); exp_list.assign(1, std::string());
-        src_list.insert(src_list.end(), d.begin(), d.end());
-        exp_list.insert(exp_list.end(), d.begin(), d.end());
-        src_i = (int)index_of(src_list, cs); exp_i = (int)index_of(exp_list, ce);
-    }
-    static size_t index_of(std::vector<std::string> &v, const std::string &p) {   /* adds p when it isn't listed */
-        for (size_t i = 0; i < v.size(); i++) if (v[i] == p) return i;
-        v.push_back(p);
-        return v.size() - 1;
+        std::string cs = src.path(), ce = exp.path();
+        src.locs = exp.locs = locs; src.subs = exp.subs = subs;
+        src.set_path(cs); exp.set_path(ce);
     }
     void apply_folders_locked() {
-        cfg.scan.roots = src_i > 0 ? std::vector<std::string>(1, src_list[src_i]) : def_roots;
-        cfg.export_dir = exp_i > 0 ? exp_list[exp_i] : def_export;
+        std::string sp = src.path(), ep = exp.path();
+        cfg.scan.roots = sp.empty() ? def_roots : std::vector<std::string>(1, sp);
+        cfg.export_dir = ep.empty() ? def_export : ep;
+        cfg.scan.max_bytes = (int64_t)SIZE_MB[size_idx] * 1024 * 1024;
     }
     static std::string folder_label(const std::string &p, const char *dflt, size_t max) {
         if (p.empty()) return dflt;
@@ -342,14 +379,22 @@ struct Inst {
         if (s.size() > max) s = "~" + s.substr(s.size() - (max - 1));
         return s;
     }
-    void step_folder(bool source, int dir) {
+    static std::string sub_label(const FolderSel &f) {
+        if (f.loc <= 0) return "-";
+        if (f.sub <= 0) return "(whole folder)";
+        std::string pre = std::to_string(f.sub) + "/" + std::to_string(f.subs[f.loc].size() - 1) + " ";
+        std::string nm = base_name(f.subs[f.loc][f.sub]);
+        size_t room = 23 > pre.size() ? 23 - pre.size() : 1;
+        if (nm.size() > room) nm = nm.substr(0, room - 1) + "~";
+        return pre + nm;
+    }
+    /* which: 0 source location, 1 source inside, 2 export location, 3 export inside; d = steps */
+    void step_folder(int which, int d) {
         std::lock_guard<std::mutex> l(mu);
-        std::vector<std::string> &v = source ? src_list : exp_list;
-        int &i = source ? src_i : exp_i;
-        int n = (int)v.size();
-        i = ((i + dir) % n + n) % n;
+        FolderSel &f = which < 2 ? src : exp;
+        if (which % 2 == 0) f.step_loc(d); else f.step_sub(d);
         apply_folders_locked();
-        status = source ? "Source set: Rescan" : "Export folder set";
+        status = which < 2 ? "Source set: Rescan" : "Export folder set";
     }
 
     /* ---- library ---- */
@@ -395,7 +440,7 @@ struct Inst {
         }
     }
     void scan_main(bool force, ScanOpts opts, std::string sig) {
-        install_folder_lists(discover_dirs());
+        { std::vector<std::string> l; std::vector<std::vector<std::string> > sb; discover_dirs(l, sb); install_folder_lists(l, sb); }
         for (;;) {
             scan_pass(force, opts, sig);
             std::lock_guard<std::mutex> l(smu);
@@ -482,7 +527,7 @@ struct Inst {
         localtime_r(&t, &tmv);
         char nm[48];
         strftime(nm, sizeof nm, "LuckyDip-%m%d-%H%M%S", &tmv);
-        j.name = nm; j.dir = cfg.export_dir;
+        j.name = nm; j.dir = cfg.export_dir; j.link = link_samples;
         push(j);
         status = "Exporting...";
     }
@@ -504,7 +549,8 @@ struct Inst {
     std::string get_state() {
         std::lock_guard<std::mutex> l(mu);
         std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel) + "\ndup=" + (prevent_dup ? "1" : "0") + "\n" +
-                        "src=" + src_list[src_i] + "\nexp=" + exp_list[exp_i] + "\n";
+                        "src=" + src.path() + "\nexp=" + exp.path() + "\nlink=" + (link_samples ? "1" : "0") +
+                        "\nloops=" + (cfg.scan.skip_loops ? "1" : "0") + "\nsize=" + std::to_string(size_idx) + "\n";
         for (int i = 0; i < NPADS; i++) {
             const Pad &p = pads[i];
             char head[96];
@@ -540,8 +586,11 @@ struct Inst {
             if (first) { first = false; if (line != STATE_MAGIC) return; continue; }
             if (line.compare(0, 4, "sel=") == 0) sel = std::max(0, std::min(NPADS - 1, atoi(line.c_str() + 4)));
             else if (line.compare(0, 4, "dup=") == 0) prevent_dup = atoi(line.c_str() + 4) != 0;
-            else if (line.compare(0, 4, "src=") == 0) { src_i = (int)index_of(src_list, line.substr(4)); folders_changed = true; }
-            else if (line.compare(0, 4, "exp=") == 0) { exp_i = (int)index_of(exp_list, line.substr(4)); folders_changed = true; }
+            else if (line.compare(0, 4, "src=") == 0) { src.set_path(line.substr(4)); folders_changed = true; }
+            else if (line.compare(0, 4, "exp=") == 0) { exp.set_path(line.substr(4)); folders_changed = true; }
+            else if (line.compare(0, 5, "link=") == 0) link_samples = atoi(line.c_str() + 5) != 0;
+            else if (line.compare(0, 6, "loops=") == 0) { cfg.scan.skip_loops = atoi(line.c_str() + 6) != 0; folders_changed = true; }
+            else if (line.compare(0, 5, "size=") == 0) { size_idx = std::max(0, std::min(NSIZES - 1, atoi(line.c_str() + 5))); folders_changed = true; }
             else if (line.compare(0, 4, "pad\t") == 0) {
                 /* pad \t idx \t locked \t pool \t cat \t gain \t path */
                 std::vector<std::string> f;
@@ -591,7 +640,8 @@ void *e_create(const char *data_dir) {
     in->cfg = load_config(in->data_dir);
     in->def_roots = in->cfg.scan.roots;
     in->def_export = in->cfg.export_dir;
-    in->src_list.assign(1, std::string()); in->exp_list.assign(1, std::string());   /* the scanner thread fills the choices in */
+    for (int i = 0; i < NSIZES; i++) if (SIZE_MB[i] * 1024LL * 1024 <= in->cfg.scan.max_bytes) in->size_idx = i;   /* conf's max_mb, rounded down to a choice */
+    in->apply_folders_locked();
     in->sig = roots_signature(in->cfg.scan);
     in->cache_path = in->data_dir + "/index.cache";
     in->status = "Starting...";
@@ -636,10 +686,23 @@ void e_set_param(void *h, const char *key, const char *val) {
     if (!strcmp(key, "normalise")) { if (is_on(val)) in->normalise(); return; }
     if (!strcmp(key, "export")) { if (is_on(val)) in->do_export_req(); return; }
     if (!strcmp(key, "rescan")) { if (is_on(val)) in->start_scan(true); return; }
-    if (!strcmp(key, "src_prev")) { if (is_on(val)) in->step_folder(true, -1); return; }
-    if (!strcmp(key, "src_next")) { if (is_on(val)) in->step_folder(true, 1); return; }
-    if (!strcmp(key, "exp_prev")) { if (is_on(val)) in->step_folder(false, -1); return; }
-    if (!strcmp(key, "exp_next")) { if (is_on(val)) in->step_folder(false, 1); return; }
+    {   /* SETTINGS: <src|exp>_<loc|sub>_<prev|next|prev10|next10> */
+        static const char *const F[] = {"src_loc", "src_sub", "exp_loc", "exp_sub"};
+        for (int w = 0; w < 4; w++) {
+            size_t fl = strlen(F[w]);
+            if (strncmp(key, F[w], fl) || key[fl] != '_') continue;
+            const char *v = key + fl + 1;
+            if (!is_on(val)) return;
+            if (!strcmp(v, "prev")) in->step_folder(w, -1);
+            else if (!strcmp(v, "next")) in->step_folder(w, 1);
+            else if (!strcmp(v, "prev10")) in->step_folder(w, -10);
+            else if (!strcmp(v, "next10")) in->step_folder(w, 10);
+            return;
+        }
+    }
+    if (!strcmp(key, "export_mode")) { std::lock_guard<std::mutex> l(in->mu); in->link_samples = atoi(val) == 1; return; }
+    if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "Rescan to apply"; return; }
+    if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "Rescan to apply"; return; }
     if (!strcmp(key, "prevent_dup")) { std::lock_guard<std::mutex> l(in->mu); in->prevent_dup = is_on(val); return; }
     if (!strcmp(key, "sel_pad")) {
         std::lock_guard<std::mutex> l(in->mu);
@@ -678,9 +741,14 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
         return put(buf, n, sh.lib->recs.empty() ? "No samples" : std::to_string(sh.lib->recs.size()) + " samples");
     }
     std::lock_guard<std::mutex> l(in->mu);
-    if (!strcmp(key, "src_name")) return put(buf, n, Inst::folder_label(in->src_list[in->src_i], "Default (auto)", 23));
-    if (!strcmp(key, "exp_name")) return put(buf, n, Inst::folder_label(in->exp_list[in->exp_i], "Default (auto)", 23));
-    if (!strcmp(key, "src_prev") || !strcmp(key, "src_next") || !strcmp(key, "exp_prev") || !strcmp(key, "exp_next")) return put(buf, n, "0");
+    if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 23));
+    if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 23));
+    if (!strcmp(key, "src_sub_name")) return put(buf, n, Inst::sub_label(in->src));
+    if (!strcmp(key, "exp_sub_name")) return put(buf, n, Inst::sub_label(in->exp));
+    if (!strncmp(key, "src_loc_", 8) || !strncmp(key, "src_sub_", 8) || !strncmp(key, "exp_loc_", 8) || !strncmp(key, "exp_sub_", 8)) return put(buf, n, "0");   /* triggers */
+    if (!strcmp(key, "export_mode")) return put(buf, n, in->link_samples ? "1" : "0");
+    if (!strcmp(key, "skip_loops")) return put(buf, n, in->cfg.scan.skip_loops ? "1" : "0");
+    if (!strcmp(key, "max_size")) return put(buf, n, std::to_string(in->size_idx));
     if (!strcmp(key, "status")) return put(buf, n, in->status);
     if (!strcmp(key, "export_name")) return put(buf, n, in->export_name.empty() ? "-" : in->export_name);
     if (!strcmp(key, "prevent_dup")) return put(buf, n, in->prevent_dup ? "1" : "0");

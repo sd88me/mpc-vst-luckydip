@@ -7,6 +7,7 @@
 #include <errno.h>
 #include <stdio.h>
 #include <sys/stat.h>
+#include <unistd.h>
 #include <string>
 #include <vector>
 #include "ld_audio.h"
@@ -189,7 +190,7 @@ struct ExportResult { bool ok = false; std::string path, error; int pads = 0, ga
 
 /* exportXpm: <dir>/<name>/<name>.xpm + each sample copied beside it (named to match <SampleName>) + MANIFEST.txt.
  * Samples are byte-exact copies; the MPC loads "<SampleName>.wav" from the .xpm's own folder. */
-inline ExportResult export_xpm(const std::string &dir, const std::string &name_in, const Pad pads[NPADS]) {
+inline ExportResult export_xpm(const std::string &dir, const std::string &name_in, const Pad pads[NPADS], bool link = false) {
     ExportResult r;
     std::string name = name_in;
     for (size_t i = 0; i < name.size(); i++) if (name[i] == '/' || name[i] == '\\') name[i] = '_';
@@ -206,10 +207,17 @@ inline ExportResult export_xpm(const std::string &dir, const std::string &name_i
     for (size_t i = 0; i < man.size(); i++) {
         XpmEntry &m = man[i];
         if (m.ext != ".wav") r.warnings.push_back("pad " + std::to_string(m.pad) + ": source is " + m.ext + "; the MPC loads " + m.sample_name + ".wav beside the .xpm");
-        m.gathered = copy_file(m.src, d + "/" + m.dest);
+        bool linked = false;
+        if (link) {      /* a symlink beside the .xpm instead of a copy: the samples stay where they are */
+            std::string to = d + "/" + m.dest;
+            remove(to.c_str());
+            linked = symlink(m.src.c_str(), to.c_str()) == 0;
+            if (!linked) r.warnings.push_back("pad " + std::to_string(m.pad) + ": could not link (this card may not support links); copying instead");
+        }
+        m.gathered = linked || copy_file(m.src, d + "/" + m.dest);
         if (m.gathered) r.gathered++;
         else r.warnings.push_back("pad " + std::to_string(m.pad) + ": could not copy " + m.src);
-        mf += m.dest + "\t" + m.src + (m.gathered ? "\t[gathered]\n" : "\t[MISSING - copy by hand]\n");
+        mf += m.dest + "\t" + m.src + (!m.gathered ? "\t[MISSING - copy by hand]\n" : linked ? "\t[linked]\n" : "\t[gathered]\n");
     }
     write_text(d + "/MANIFEST.txt", mf);
     r.ok = true;

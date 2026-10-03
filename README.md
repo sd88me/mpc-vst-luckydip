@@ -21,7 +21,20 @@ Insert **Lucky Dip** as a track instrument. Pads answer MIDI notes 0-15 (the 16-
 - The kit is saved with the project.
 
 ### Sample folders and export folder (SETTINGS page)
-- **Sample source** (stepper): *Default (auto)* or one folder found on your cards: the folders directly under each
+- **Sample source**: two steppers. **Folder** is *Default (auto)* or a folder directly under a card (or on `/sdcard`);
+  **Inside** is the whole folder or one folder in it, such as a single pack in `Expansions` (`-10`/`+10` skip along a
+  long list). Press **Rescan** to apply. Choosing a category folder (say a pack's `Kicks`) works: the folder's own
+  name is used to classify.
+- **Export folder**: the same two steppers. Kits are saved as `<folder>/LuckyDip-MMDD-HHMMSS/` (the `.xpm` and a
+  `MANIFEST.txt`). **Samples**: *Copy samples* puts the audio in the kit folder (always works); *Link to originals*
+  makes symbolic links there instead, so nothing is duplicated, but the originals must stay where they are, and the
+  card must support links (otherwise it copies). Lucky Dip's own exported kits are never scanned as source material.
+- **Library**: the sample count, **Rescan**, **No Duplicates** (a sample is used on only one pad of a kit; if a pad's
+  pool runs out it may repeat one), **Unlock All**, **Skip Loops** (files that look like loops are left out) and
+  **Max File Size** (bigger files are left out). Loop and size changes apply on the next Rescan.
+- All of these are saved with the project.
+
+*Default (auto)* or one folder found on your cards: the folders directly under each
   `/media/<card>/`, every pack inside an `Expansions` folder, and the top level of `/sdcard`. Press **Rescan** after
   changing it. Choosing a category folder (say a pack's `Kicks`) works: the folder's own name is used to classify.
 - **Export folder** (stepper): same list. Kits are saved as `<folder>/LuckyDip-MMDD-HHMMSS/` (the `.xpm`, the samples

@@ -1103,53 +1103,154 @@
    "momentary": true
   },
   {
-   "key": "src_name",
-   "name": "Sample Source",
+   "key": "lib_info",
+   "name": "Library",
    "min": 0,
    "max": 0,
    "display": "string"
   },
   {
-   "key": "src_prev",
-   "name": "Source Prev",
+   "key": "src_loc_name",
+   "name": "Source Folder",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "src_loc_prev",
+   "name": "Source Folder Prev",
    "min": 0,
    "max": 1,
    "momentary": true
   },
   {
-   "key": "src_next",
-   "name": "Source Next",
+   "key": "src_loc_next",
+   "name": "Source Folder Next",
    "min": 0,
    "max": 1,
    "momentary": true
   },
   {
-   "key": "exp_name",
+   "key": "src_sub_name",
+   "name": "Source Inside",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "src_sub_prev",
+   "name": "Source Inside Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "src_sub_next",
+   "name": "Source Inside Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "src_sub_prev10",
+   "name": "Source Inside Prev 10",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "src_sub_next10",
+   "name": "Source Inside Next 10",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_loc_name",
    "name": "Export Folder",
    "min": 0,
    "max": 0,
    "display": "string"
   },
   {
-   "key": "exp_prev",
-   "name": "Export Prev",
+   "key": "exp_loc_prev",
+   "name": "Export Folder Prev",
    "min": 0,
    "max": 1,
    "momentary": true
   },
   {
-   "key": "exp_next",
-   "name": "Export Next",
+   "key": "exp_loc_next",
+   "name": "Export Folder Next",
    "min": 0,
    "max": 1,
    "momentary": true
   },
   {
-   "key": "lib_info",
-   "name": "Library",
+   "key": "exp_sub_name",
+   "name": "Export Inside",
    "min": 0,
    "max": 0,
    "display": "string"
+  },
+  {
+   "key": "exp_sub_prev",
+   "name": "Export Inside Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_sub_next",
+   "name": "Export Inside Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_sub_prev10",
+   "name": "Export Inside Prev 10",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_sub_next10",
+   "name": "Export Inside Next 10",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "export_mode",
+   "name": "Export Samples",
+   "options": [
+    "Copy samples",
+    "Link to originals"
+   ],
+   "default": 0
+  },
+  {
+   "key": "skip_loops",
+   "name": "Skip Loops",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 1
+  },
+  {
+   "key": "max_size",
+   "name": "Max File Size",
+   "options": [
+    "Off",
+    "1 MB",
+    "2 MB",
+    "5 MB",
+    "10 MB",
+    "20 MB"
+   ],
+   "default": 0
   }
  ]
 }

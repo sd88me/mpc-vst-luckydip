@@ -32,10 +32,16 @@ for i in range(1, 17):
     toggle("pad%d_lock" % i, "Pad %d Lock" % i)
     trig("pad%d_reroll" % i, "Pad %d Reroll" % i)
     trig("pad%d_play" % i, "Pad %d Play" % i)
-# settings (SETTINGS page): appended after the pad blocks so existing indices never move
-text("src_name", "Sample Source"); trig("src_prev", "Source Prev"); trig("src_next", "Source Next")
-text("exp_name", "Export Folder"); trig("exp_prev", "Export Prev"); trig("exp_next", "Export Next")
+# settings (SETTINGS page). Not shipped yet, so this tail was reworked in place; once released: append only.
 text("lib_info", "Library")
+for pre, nm in (("src", "Source"), ("exp", "Export")):
+    text(pre + "_loc_name", nm + " Folder"); trig(pre + "_loc_prev", nm + " Folder Prev"); trig(pre + "_loc_next", nm + " Folder Next")
+    text(pre + "_sub_name", nm + " Inside")
+    for v, lab in (("prev", "Prev"), ("next", "Next"), ("prev10", "Prev 10"), ("next10", "Next 10")):
+        trig(pre + "_sub_" + v, nm + " Inside " + lab)
+P.append(dict(key="export_mode", name="Export Samples", options=["Copy samples", "Link to originals"], default=0))
+toggle("skip_loops", "Skip Loops", 1)
+P.append(dict(key="max_size", name="Max File Size", options=["Off", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"], default=0))
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "params.json")
 json.dump({"name": "Lucky Dip", "params": P}, open(out, "w"), indent=1)
 print("%d params -> %s" % (len(P), out))
