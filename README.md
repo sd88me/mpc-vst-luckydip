@@ -42,10 +42,11 @@ vst/build.sh    # vst/build/lucky_dip.so + skin/<vendor> - VST - Lucky Dip/ + pl
 Install and register as any mpc-vst-plugins port (see `vendor/mpc-vst/tools` and that project's docs).
 
 ## 16-pad drum layout (advanced, optional)
-`release/mpc_patch/` patches the factory MPC OS so Lucky Dip (and Machinemodule) get the 16-pad drum layout instead of
-the melodic one. It edits `/usr/bin/MPC`, works only on MPC OS **3.9.1.2** (checked by md5, refuses anything else), is
-undone by `uninstall.sh`, and a firmware update removes it. Pad *n* sends note *n-1*, which the plugin accepts. See
-`release/mpc_patch/README.md`.
+The shared, optional MPC OS patch in mpc-vst-plugins (`tools/mpc_patch/`) makes MPC show the 16-pad drum layout for the
+plugins in its name table, **Lucky Dip** included. It edits `/usr/bin/MPC`, works only on MPC OS **3.9.1.2** (checked by
+md5, refuses anything else), is undone by its `uninstall`, and a firmware update removes it. Pad *n* sends note *n-1*,
+which this plugin accepts. Lucky Dip's name is in the table from mpc-vst-plugins PR #142; use a copy of the script from
+that PR or later.
 
 ## Credits
 The kit-building engine originated in [schwung-kit-builder](https://github.com/sd88me/schwung-kit-builder) and was

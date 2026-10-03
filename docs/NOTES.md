@@ -11,7 +11,9 @@
 ## Device (Force, MPC OS 3.9.1.2, 2026-10-03)
 - `tools/bench.sh`: PASS (worst p99 1.6%, worst block 2.9% of the 2902 us budget, with an empty kit).
 - Deployed to `/sdcard/Synths/sd88me - VST - Lucky Dip/`, registered in `pluginList-arm`; force_shadow still in MPC's environ.
-- Drum-layout patch installed (stock md5 592eebc8..., patched 31ef0968...) after uninstalling Machinemodule's own patch.
+- Drum-layout patch: tested on this Force with a private copy (patched md5 31ef0968...). That copy was a mistake: the
+  patch is shared in mpc-vst-plugins `tools/mpc_patch/`; Lucky Dip's name was added there (PR #142, patched md5
+  7cf96599...) and the private copy removed from this repo. The device moves to the shared script next.
 
 ## Not verified on a device yet (user test pending)
 Plugin loads, skin, Q-Links, 16-pad drum layout with pads sounding, library scan time on the real card, Generate/play,
