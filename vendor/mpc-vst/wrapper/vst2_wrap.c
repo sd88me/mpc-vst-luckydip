@@ -10,7 +10,7 @@
  * process() call renders exactly one DSP block and MIDI lands at its start.
  * ========================================================================== */
 #ifndef _GNU_SOURCE
-#define _GNU_SOURCE   /* dladdr, for plugin_dir.h; must precede every include */
+#define _GNU_SOURCE   /* must precede every include */
 #endif
 #include <stdint.h>
 #include <stdlib.h>
@@ -21,6 +21,12 @@
 #include "params.h"
 #ifndef HAS_LFO_BPM
 #define HAS_LFO_BPM 0 /* 1: pass the host tempo to the DSP as "lfo_bpm" */
+#endif
+#ifdef WRAP_TRACE   /* poc/inputprobe: the port provides wrap_trace() and logs every raw host call (kind 0 = setParameter, 1 = getParameter) */
+void wrap_trace(int kind, int idx, float value);
+#define TRACE(kind, idx, value) wrap_trace(kind, idx, value)
+#else
+#define TRACE(kind, idx, value) ((void)0)
 #endif
 #ifndef MODULE_DIR
 #define MODULE_DIR NULL /* set via vst.json "defines" for a DSP that reads its own files
@@ -90,6 +96,7 @@ typedef struct {
     float shadow[NPARAMS];   /* unrounded position last set on an integer param; <0 = none */
     signed char last_on[NPARAMS];  /* last "<key>_on" value told to the host, +1 (0 = unknown) */
     volatile char need_update_display;  /* deferred audioMasterUpdateDisplay -- see setParameter() */
+    int last_refresh;        /* last value of the engine's "_refresh" counter, see housekeeping() */
     float open[NPARAMS];     /* popup "open" flags (popup.h): kept here, never sent to the DSP or saved */
     char chunk[8192];
 } wrap_t;
@@ -144,6 +151,7 @@ static float get_norm(wrap_t *w, int i) {
 
 static void setParameter(AEffect *e, int32_t i, float n) {
     wrap_t *w = e->object;
+    TRACE(0, i, n);
     char buf[64];
     if (i < 0 || i >= NPARAMS) return;
     const param_t *p = &PARAMS[i];
@@ -198,7 +206,11 @@ static void setParameter(AEffect *e, int32_t i, float n) {
     w->need_update_display = 1;   /* deferred to processReplacing(), see the step_target branch above */
 }
 
-static float getParameter(AEffect *e, int32_t i) { return get_norm(e->object, i); }
+static float getParameter(AEffect *e, int32_t i) {
+    float v = get_norm(e->object, i);
+    TRACE(1, i, v);
+    return v;
+}
 
 static void update_tempo(wrap_t *w) {
     VstTimeInfo *ti = (VstTimeInfo *)w->master(&w->fx, audioMasterGetTime, 0, kVstTempoValid, 0, 0);
@@ -234,6 +246,17 @@ static void housekeeping(AEffect *e, int32_t n) {
      * setParameter, so the host is not re-entered from its own call. */
     for (int i = 0; i < NPARAMS; i++)
         if (w->holdFrames[i] > 0 && (w->holdFrames[i] -= n) <= 0) { w->holdFrames[i] = 0; w->master(&w->fx, audioMasterAutomate, i, 0, 0, 0.0f); }
+    /* An engine whose on-screen text changes by itself (a scan finishing, a pad hit moving the selection) has no
+     * setParameter to piggy-back on. It may expose a "_refresh" counter: when the value changes, ask the host to
+     * re-read the display text. Engines without the key answer 0 (get_param <= 0) and cost one cheap call. The call must
+     * not block: this runs on the audio thread. */
+    {
+        char rb[16];
+        if (g_api->get_param(w->dsp, "_refresh", rb, sizeof rb) > 0) {
+            int r = atoi(rb);
+            if (r != w->last_refresh) { w->last_refresh = r; w->need_update_display = 1; }
+        }
+    }
     if (w->need_update_display) {
         w->need_update_display = 0;
         w->master(&w->fx, audioMasterUpdateDisplay, 0, 0, 0, 0.0f);
@@ -260,11 +283,14 @@ static int16_t f2s(float f) { f *= 32768.0f; return f >= 32767.0f ? 32767 : f <=
 static void run_block(AEffect *e, float **in, float **out, int32_t n, int accumulate) {
     wrap_t *w = e->object;
     housekeeping(e, n);
+    /* A conforming host passes real input to an effect, but a plugin scanner (and the device's own load
+     * probe) may call processReplacing with in == NULL; treat a missing input channel as silence. */
+    int have_in = in && in[0] && in[1];
     int32_t i = 0;
     while (i < n) {
         int aligned = w->inpos == 0 && w->pos >= DSP_BLOCK && n - i >= DSP_BLOCK;
         if (aligned) {
-            for (int j = 0; j < DSP_BLOCK; j++) { w->inb[2 * j] = f2s(in[0][i + j]); w->inb[2 * j + 1] = f2s(in[1][i + j]); }
+            for (int j = 0; j < DSP_BLOCK; j++) { w->inb[2 * j] = have_in ? f2s(in[0][i + j]) : 0; w->inb[2 * j + 1] = have_in ? f2s(in[1][i + j]) : 0; }
             g_api->process(w->dsp, w->inb, w->block, DSP_BLOCK);
             for (int j = 0; j < DSP_BLOCK; j++) {
                 float l = w->block[2 * j] * (1.0f / 32768.0f), r = w->block[2 * j + 1] * (1.0f / 32768.0f);
@@ -276,7 +302,7 @@ static void run_block(AEffect *e, float **in, float **out, int32_t n, int accumu
         float l = 0, r = 0;
         if (w->pos < DSP_BLOCK) { l = w->block[w->pos * 2] * (1.0f / 32768.0f); r = w->block[w->pos * 2 + 1] * (1.0f / 32768.0f); w->pos++; }
         if (accumulate) { out[0][i] += l; out[1][i] += r; } else { out[0][i] = l; out[1][i] = r; }
-        w->inb[2 * w->inpos] = f2s(in[0][i]); w->inb[2 * w->inpos + 1] = f2s(in[1][i]);
+        w->inb[2 * w->inpos] = have_in ? f2s(in[0][i]) : 0; w->inb[2 * w->inpos + 1] = have_in ? f2s(in[1][i]) : 0;
         if (++w->inpos == DSP_BLOCK) { g_api->process(w->dsp, w->inb, w->block, DSP_BLOCK); w->pos = 0; w->inpos = 0; }
         i++;
     }

@@ -42,6 +42,7 @@ for pre, nm in (("src", "Source"), ("exp", "Export")):
 P.append(dict(key="export_mode", name="Export Samples", options=["Copy samples", "Link to originals"], default=0))
 toggle("skip_loops", "Skip Loops", 1)
 P.append(dict(key="max_size", name="Max File Size", options=["Off", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"], default=0))
+toggle("follow", "Follow Played Pad", 1)    # PAD EDIT follows the last pad played
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "params.json")
 json.dump({"name": "Lucky Dip", "params": P}, open(out, "w"), indent=1)
 print("%d params -> %s" % (len(P), out))

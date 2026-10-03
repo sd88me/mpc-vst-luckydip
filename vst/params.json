@@ -1251,6 +1251,15 @@
     "20 MB"
    ],
    "default": 0
+  },
+  {
+   "key": "follow",
+   "name": "Follow Played Pad",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 1
   }
  ]
 }

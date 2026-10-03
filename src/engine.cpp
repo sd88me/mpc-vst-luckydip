@@ -231,7 +231,9 @@ struct Inst {
     Pad pads[NPADS];
     char loaded[NPADS];              /* 0 none, 1 playable, 2 failed to decode */
     float rms[NPADS];
-    int sel = 0;
+    std::atomic<int> sel{0};            /* the selected pad (PAD EDIT page); follow moves it from the audio thread */
+    std::atomic<int> refresh{0};        /* "_refresh": bumped when on-screen text changes by itself; the wrapper polls it */
+    std::atomic<bool> follow{true};     /* the selection follows the last pad played */
     bool prevent_dup = true;
     std::string status, export_name;
     uint32_t seed_ctr = 0;
@@ -252,7 +254,7 @@ struct Inst {
         for (int i = 0; i < NPADS; i++) { rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
     }
 
-    void set_status(const std::string &s) { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); }
+    void set_status(const std::string &s) { { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); } ++refresh; }
     uint32_t new_seed() {
         uint64_t t = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
         uint32_t s = (uint32_t)(t ^ (t >> 32)) * 2654435761u + (++seed_ctr) * 40503u + (uint32_t)time(0);
@@ -306,7 +308,7 @@ struct Inst {
         bool ok = decode(j.path, *p);
         std::lock_guard<std::mutex> l(mu);
         if (!pads[j.pad].has || pads[j.pad].sample.path != j.path) { delete p; return; }   /* superseded */
-        if (!ok) { delete p; loaded[j.pad] = 2; return; }
+        if (!ok) { delete p; loaded[j.pad] = 2; ++refresh; return; }   /* the name now shows the "!" mark */
         rms[j.pad] = p->rms;
         retire(buf[j.pad].exchange(p));
         loaded[j.pad] = 1;
@@ -316,6 +318,7 @@ struct Inst {
         std::lock_guard<std::mutex> l(mu);
         if (r.ok) { export_name = j.name; status = r.warnings.empty() ? "Exported OK" : "Exported (see log)"; }
         else status = "Export failed";
+        ++refresh;
         if (!r.ok) fprintf(stderr, "luckydip: export failed: %s\n", r.error.c_str());
         for (size_t i = 0; i < r.warnings.size(); i++) fprintf(stderr, "luckydip: export: %s\n", r.warnings[i].c_str());
     }
@@ -543,12 +546,16 @@ struct Inst {
         std::lock_guard<std::mutex> l2(mu);
         status = reject ? "Rejected" : "Favourited";
     }
-    void trigger(int pad, int vel) { if (pad >= 0 && pad < NPADS) pending[pad] = vel; }
+    void trigger(int pad, int vel) {
+        if (pad < 0 || pad >= NPADS) return;
+        pending[pad] = vel;
+        if (follow.load() && sel.load() != pad) { sel = pad; ++refresh; }       /* lock-free: this runs on the audio thread */
+    }
 
     /* ---- state ---- */
     std::string get_state() {
         std::lock_guard<std::mutex> l(mu);
-        std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel) + "\ndup=" + (prevent_dup ? "1" : "0") + "\n" +
+        std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel.load()) + "\nfollow=" + (follow ? "1" : "0") + "\ndup=" + (prevent_dup ? "1" : "0") + "\n" +
                         "src=" + src.path() + "\nexp=" + exp.path() + "\nlink=" + (link_samples ? "1" : "0") +
                         "\nloops=" + (cfg.scan.skip_loops ? "1" : "0") + "\nsize=" + std::to_string(size_idx) + "\n";
         for (int i = 0; i < NPADS; i++) {
@@ -585,6 +592,7 @@ struct Inst {
             pos = e + 1;
             if (first) { first = false; if (line != STATE_MAGIC) return; continue; }
             if (line.compare(0, 4, "sel=") == 0) sel = std::max(0, std::min(NPADS - 1, atoi(line.c_str() + 4)));
+            else if (line.compare(0, 7, "follow=") == 0) follow = atoi(line.c_str() + 7) != 0;
             else if (line.compare(0, 4, "dup=") == 0) prevent_dup = atoi(line.c_str() + 4) != 0;
             else if (line.compare(0, 4, "src=") == 0) { src.set_path(line.substr(4)); folders_changed = true; }
             else if (line.compare(0, 4, "exp=") == 0) { exp.set_path(line.substr(4)); folders_changed = true; }
@@ -704,6 +712,7 @@ void e_set_param(void *h, const char *key, const char *val) {
     if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "Rescan to apply"; return; }
     if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "Rescan to apply"; return; }
     if (!strcmp(key, "prevent_dup")) { std::lock_guard<std::mutex> l(in->mu); in->prevent_dup = is_on(val); return; }
+    if (!strcmp(key, "follow")) { in->follow = is_on(val); return; }
     if (!strcmp(key, "sel_pad")) {
         std::lock_guard<std::mutex> l(in->mu);
         in->sel = std::max(0, std::min(NPADS - 1, (int)(atof(val) + 0.5) - 1));
@@ -731,6 +740,7 @@ int put(char *buf, int n, const std::string &s) { snprintf(buf, n, "%s", s.c_str
 int e_get_param(void *h, const char *key, char *buf, int n) {
     Inst *in = (Inst *)h;
     if (n <= 0) return 0;
+    if (!strcmp(key, "_refresh")) { snprintf(buf, n, "%d", in->refresh.load()); return (int)strlen(buf) + 1; }   /* lock-free, no allocation */
     size_t kl = strlen(key);
     if (kl > 3 && !strcmp(key + kl - 3, "_on")) return 0;   /* the wrapper polls these from the audio thread: no lock */
     if (!strcmp(key, "state")) return put(buf, n, in->get_state());
@@ -752,7 +762,8 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
     if (!strcmp(key, "status")) return put(buf, n, in->status);
     if (!strcmp(key, "export_name")) return put(buf, n, in->export_name.empty() ? "-" : in->export_name);
     if (!strcmp(key, "prevent_dup")) return put(buf, n, in->prevent_dup ? "1" : "0");
-    if (!strcmp(key, "sel_pad")) return put(buf, n, std::to_string(in->sel + 1));
+    if (!strcmp(key, "sel_pad")) return put(buf, n, std::to_string(in->sel.load() + 1));
+    if (!strcmp(key, "follow")) return put(buf, n, in->follow ? "1" : "0");
     int pad; const char *f;
     if (!split_key(in, key, &pad, &f)) return 0;
     const Pad &p = in->pads[pad];

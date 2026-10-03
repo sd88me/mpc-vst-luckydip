@@ -42,11 +42,13 @@ project save/reload, export loading in the Force's browser.
 - A scan request while one of this instance's scans runs is queued (a project load sets the saved source right after
   create() started the first scan). Instances share one library: two instances with different sources fight over it.
 
+## Text refresh (2026-10-04)
+The engine exposes a lock-free `"_refresh"` counter (bumped by scan/export status changes, a failed sample decode and
+FOLLOW moving the selection). The wrapper polls it and schedules `audioMasterUpdateDisplay`, so that text no longer waits for a touch.
+This needs the wrapper change in mpc-vst-plugins PR #157 (also applied to `vendor/mpc-vst/`). Not yet verified on a device.
+
 ## Open issues
-- **Async text does not refresh.** The wrapper only calls `audioMasterUpdateDisplay` after a `setParameter`, so a
-  background scan finishing ("Library: N samples") or an export finishing ("Exported OK") shows on the next
-  interaction, not by itself. Generate/reroll/clear are synchronous and refresh at once. A fix belongs in the shared
-  wrapper (poll an engine "refresh" key in `housekeeping`); not changed here because the wrapper is vendored.
+- ~~Async text does not refresh~~ (fixed by the `_refresh` counter, see above; pending device check).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.
 - The host chunk buffer is 8 KiB: a kit with very long paths drops its later pads from the saved state.
 - Per-category pad colours on the MPC pad LEDs are not reachable (see the Machinemodule patch notes): all red.

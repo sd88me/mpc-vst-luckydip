@@ -12,10 +12,13 @@ pass (see `docs/NOTES.md`).
 ## Using it
 Insert **Lucky Dip** as a track instrument. Pads answer MIDI notes 0-15 (the 16-pad drum layout) and 36-51.
 
-- **PADS 1-8 / PADS 9-16**: per pad, the sample name, its category, PLAY, REROLL, LOCK and a GAIN knob (Q-Links 1-8).
-- **DETAIL page**: the category matrix for the selected pad (tap categories to build the pool it draws from; none =
+- **PADS 1-8 / PADS 9-16**: per pad, the sample name, its category, PLAY, REROLL, LOCK and a GAIN knob (Q-Links 1-8), and
+  **GENERATE ALL** in the banner next to the status line.
+- **PAD EDIT page**: the category matrix for the selected pad (tap categories to build the pool it draws from; none =
   the default pool for that pad slot), the pad stepper, gain, lock, clear, reroll, favourite/reject, and the kit
   actions: **Generate All**, **Clear All**, **Normalise** (match levels), **Rescan Library**, **Export Kit**.
+- **FOLLOW** (PAD EDIT): the selected pad follows the last pad you play (by MIDI or a PLAY button). The plugin can't switch the
+  visible tab, so stay on PAD EDIT and it follows. Turn it off to edit one pad while playing others.
 - Locked pads keep their sample through Generate/Clear/Reroll. Favourites are drawn about twice as often; rejects are
   never drawn again (library-wide, kept in `prefs.txt`).
 - The kit is saved with the project.

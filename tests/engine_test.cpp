@@ -128,6 +128,22 @@ int main() {
     CHECK(ld::read_file(root + "/chosen/" + get(h3, "export_name") + "/" + get(h3, "export_name") + ".xpm", xb3), "xpm landed in the chosen export folder");
     trig(h3, "src_loc_next");
     CHECK(get(h3, "status").compare(0, 6, "Source") == 0, "stepping the source says to rescan: \"%s\"", get(h3, "status").c_str());
+    /* follow: the selection moves to the last pad played, and "_refresh" changes so the wrapper redraws the text */
+    {
+        std::string r0 = get(h3, "_refresh");
+        CHECK(get(h3, "follow") == "1", "follow is on by default");
+        uint8_t n3[3] = {0x90, 3, 100};
+        E->midi(h3, n3, 3);
+        CHECK(get(h3, "sel_pad") == "4" && get(h3, "_refresh") != r0, "note 3 selects pad 4 and bumps _refresh (%s -> %s)", r0.c_str(), get(h3, "_refresh").c_str());
+        trig(h3, "pad7_play");
+        CHECK(get(h3, "sel_pad") == "7", "a PLAY button selects its pad too");
+        E->set_param(h3, "follow", "0");
+        std::string r1 = get(h3, "_refresh");
+        n3[1] = 9; E->midi(h3, n3, 3);
+        CHECK(get(h3, "sel_pad") == "7" && get(h3, "_refresh") == r1, "follow off: the selection stays");
+        CHECK(get(h3, "state").find("\nfollow=0\n") != std::string::npos, "follow is saved");
+        E->set_param(h3, "follow", "1");
+    }
     /* link mode: symlinks beside the .xpm instead of copies; loops/size settings are saved in the state */
     E->set_param(h3, "export_mode", "1");
     trig(h3, "export");
