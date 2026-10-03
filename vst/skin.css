@@ -1,0 +1,32 @@
+/* Lucky Dip skin look: candy colours on grape, glossy pill buttons, rounded wells (docs/SKIN_STUDIO.md, browser renderer).
+ * Geometry is the layout's; this only changes colours, shapes and effects. Panels and the banner are images/*.svg. */
+:root {
+  --title-size: 22px;
+  --button-size: 16px;
+  --sheen: 0.28;
+}
+/* tile / panel titles sit on candy colours: white with a dark outline reads on every one of them */
+.frame-title, .td3 .frame-title { fill: #ffffff; stroke: #3a0f66; stroke-width: 5px; paint-order: stroke; stroke-linejoin: round; letter-spacing: 0.1em; }
+.frame-border { stroke: none; }
+.td3 .frame-border { fill: none; stroke: none; }
+.frame-rule { stroke: none; }
+/* pill buttons with a gloss and a white rim */
+.button-bg { rx: 22px; stroke: #ffffff; stroke-width: 2.5px; filter: drop-shadow(0 3px 0 rgba(40, 8, 80, 0.55)); }
+.button-sheen { rx: 22px; opacity: 0.9; }
+.button-tx, .td3 .button-tx { fill: #ffffff; font-weight: 700; letter-spacing: 0.12em; stroke: rgba(40, 8, 80, 0.55); stroke-width: 3px; paint-order: stroke; }
+/* gain knobs: cream faces on a violet track, a yellow value arc */
+.knob-track { stroke: #4b1f8f; }
+.knob-arc { stroke: #ffd23f; }
+.knob-face { fill: #fff4d6; stroke: #ffffff; stroke-width: 2px; }
+.knob-pointer { stroke: #ff2e7e; }
+/* rounded dark wells for the live text */
+.box { rx: 10px; fill: #1d0a3d; stroke: #ffffff; stroke-width: 1.5px; stroke-opacity: 0.55; }
+.box-label { fill: #ffffff; }
+.arrow-bg { fill: #4b1f8f; }
+.arrow { fill: #ffd23f; }
+/* toggles: violet track, mint thumb when on */
+.pill-track { fill: #2a0e5c; stroke: #ffffff; stroke-width: 1.5px; stroke-opacity: 0.7; }
+.pill-thumb { fill: #8a6fc9; }
+.on .pill-thumb { fill: #3dffb0; filter: drop-shadow(0 0 5px #3dffb0); }
+/* the control names under knobs and toggles */
+.text { fill: #ffffff; font-weight: 700; stroke: rgba(40, 8, 80, 0.6); stroke-width: 3px; paint-order: stroke; }

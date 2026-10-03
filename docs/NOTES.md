@@ -6,7 +6,7 @@
   against a scratch library (scan, generate, decode, pad notes sound, state round trip, reroll, pool override, clear,
   match levels, export), and the mpc-vst wrapper host test (140 params).
 - `vst/build.sh` builds `lucky_dip.so` (armhf, highest glibc 2.34; the device has 2.39).
-- Skin previewed offline (`studio.py preview`): both pages fit.
+- Skin: candy look (slot-machine banner, per-pad candy tiles, pill buttons) on the browser renderer; pads split over PADS 1-8, PADS 9-16 and DETAIL; previewed offline.
 
 ## Device (Force, MPC OS 3.9.1.2, 2026-10-03)
 - `tools/bench.sh`: PASS (worst p99 1.6%, worst block 2.9% of the 2902 us budget, with an empty kit).
