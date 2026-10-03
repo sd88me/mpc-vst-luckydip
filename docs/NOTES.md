@@ -8,8 +8,14 @@
 - `vst/build.sh` builds `lucky_dip.so` (armhf, highest glibc 2.34; the device has 2.39).
 - Skin previewed offline (`studio.py preview`): both pages fit.
 
-## Not verified on a device yet
-Load, skin, Q-Links, project save/reload, real library scan time, CPU (`tools/bench.sh`), the drum-layout patch.
+## Device (Force, MPC OS 3.9.1.2, 2026-10-03)
+- `tools/bench.sh`: PASS (worst p99 1.6%, worst block 2.9% of the 2902 us budget, with an empty kit).
+- Deployed to `/sdcard/Synths/sd88me - VST - Lucky Dip/`, registered in `pluginList-arm`; force_shadow still in MPC's environ.
+- Drum-layout patch installed (stock md5 592eebc8..., patched 31ef0968...) after uninstalling Machinemodule's own patch.
+
+## Not verified on a device yet (user test pending)
+Plugin loads, skin, Q-Links, 16-pad drum layout with pads sounding, library scan time on the real card, Generate/play,
+project save/reload, export loading in the Force's browser.
 
 ## Decisions and differences from force-kit-builder
 - **Per-pad pool** is a set of categories (a bitmask, the shadow DETAIL matrix) as in the shadow page; the web UI's
