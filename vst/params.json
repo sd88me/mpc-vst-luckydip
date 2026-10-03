@@ -1,0 +1,1106 @@
+{
+ "name": "Lucky Dip",
+ "params": [
+  {
+   "key": "status",
+   "name": "Status",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "sel_gain",
+   "name": "Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "generate",
+   "name": "Generate All",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "clear_all",
+   "name": "Clear All",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "normalise",
+   "name": "Match Levels",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "export",
+   "name": "Export Kit",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "rescan",
+   "name": "Rescan Library",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "unlock_all",
+   "name": "Unlock All",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "prevent_dup",
+   "name": "No Duplicates",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 1
+  },
+  {
+   "key": "sel_pad",
+   "name": "Pad",
+   "min": 1,
+   "max": 16,
+   "default": 1,
+   "display": "int"
+  },
+  {
+   "key": "sel_prev",
+   "name": "Prev Pad",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "step_of": "sel_pad",
+   "step_delta": -1
+  },
+  {
+   "key": "sel_next",
+   "name": "Next Pad",
+   "min": 0,
+   "max": 1,
+   "momentary": true,
+   "step_of": "sel_pad",
+   "step_delta": 1
+  },
+  {
+   "key": "sel_name",
+   "name": "Sample",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "sel_cat",
+   "name": "Category",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "sel_cat_kick",
+   "name": "Kick",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_snare",
+   "name": "Snare",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_rim",
+   "name": "Rim",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_clap",
+   "name": "Clap",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_hat",
+   "name": "Hat",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_closed_hat",
+   "name": "Closed Hat",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_open_hat",
+   "name": "Open Hat",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_tom",
+   "name": "Tom",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_conga",
+   "name": "Conga",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_percussion",
+   "name": "Percussion",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_crash",
+   "name": "Crash",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_ride",
+   "name": "Ride",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_cymbal",
+   "name": "Cymbal",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_fx",
+   "name": "Fx",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_glitch",
+   "name": "Glitch",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_vox",
+   "name": "Vox",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_bass",
+   "name": "Bass",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_synth",
+   "name": "Synth",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_stab",
+   "name": "Stab",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_chord",
+   "name": "Chord",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_lead",
+   "name": "Lead",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_pad",
+   "name": "Pad",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_cat_other",
+   "name": "Other",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_lock",
+   "name": "Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "sel_reroll",
+   "name": "Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "sel_clear",
+   "name": "Clear",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "sel_play",
+   "name": "Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "sel_fav",
+   "name": "Favourite",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "sel_reject",
+   "name": "Reject",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "export_name",
+   "name": "Last Export",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad1_name",
+   "name": "Pad 1",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad1_pill",
+   "name": "Pad 1 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad1_gain",
+   "name": "Pad 1 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad1_lock",
+   "name": "Pad 1 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad1_reroll",
+   "name": "Pad 1 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad1_play",
+   "name": "Pad 1 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad2_name",
+   "name": "Pad 2",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad2_pill",
+   "name": "Pad 2 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad2_gain",
+   "name": "Pad 2 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad2_lock",
+   "name": "Pad 2 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad2_reroll",
+   "name": "Pad 2 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad2_play",
+   "name": "Pad 2 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad3_name",
+   "name": "Pad 3",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad3_pill",
+   "name": "Pad 3 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad3_gain",
+   "name": "Pad 3 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad3_lock",
+   "name": "Pad 3 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad3_reroll",
+   "name": "Pad 3 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad3_play",
+   "name": "Pad 3 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad4_name",
+   "name": "Pad 4",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad4_pill",
+   "name": "Pad 4 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad4_gain",
+   "name": "Pad 4 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad4_lock",
+   "name": "Pad 4 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad4_reroll",
+   "name": "Pad 4 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad4_play",
+   "name": "Pad 4 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad5_name",
+   "name": "Pad 5",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad5_pill",
+   "name": "Pad 5 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad5_gain",
+   "name": "Pad 5 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad5_lock",
+   "name": "Pad 5 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad5_reroll",
+   "name": "Pad 5 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad5_play",
+   "name": "Pad 5 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad6_name",
+   "name": "Pad 6",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad6_pill",
+   "name": "Pad 6 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad6_gain",
+   "name": "Pad 6 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad6_lock",
+   "name": "Pad 6 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad6_reroll",
+   "name": "Pad 6 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad6_play",
+   "name": "Pad 6 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad7_name",
+   "name": "Pad 7",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad7_pill",
+   "name": "Pad 7 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad7_gain",
+   "name": "Pad 7 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad7_lock",
+   "name": "Pad 7 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad7_reroll",
+   "name": "Pad 7 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad7_play",
+   "name": "Pad 7 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad8_name",
+   "name": "Pad 8",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad8_pill",
+   "name": "Pad 8 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad8_gain",
+   "name": "Pad 8 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad8_lock",
+   "name": "Pad 8 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad8_reroll",
+   "name": "Pad 8 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad8_play",
+   "name": "Pad 8 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad9_name",
+   "name": "Pad 9",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad9_pill",
+   "name": "Pad 9 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad9_gain",
+   "name": "Pad 9 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad9_lock",
+   "name": "Pad 9 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad9_reroll",
+   "name": "Pad 9 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad9_play",
+   "name": "Pad 9 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad10_name",
+   "name": "Pad 10",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad10_pill",
+   "name": "Pad 10 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad10_gain",
+   "name": "Pad 10 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad10_lock",
+   "name": "Pad 10 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad10_reroll",
+   "name": "Pad 10 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad10_play",
+   "name": "Pad 10 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad11_name",
+   "name": "Pad 11",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad11_pill",
+   "name": "Pad 11 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad11_gain",
+   "name": "Pad 11 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad11_lock",
+   "name": "Pad 11 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad11_reroll",
+   "name": "Pad 11 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad11_play",
+   "name": "Pad 11 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad12_name",
+   "name": "Pad 12",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad12_pill",
+   "name": "Pad 12 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad12_gain",
+   "name": "Pad 12 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad12_lock",
+   "name": "Pad 12 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad12_reroll",
+   "name": "Pad 12 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad12_play",
+   "name": "Pad 12 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad13_name",
+   "name": "Pad 13",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad13_pill",
+   "name": "Pad 13 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad13_gain",
+   "name": "Pad 13 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad13_lock",
+   "name": "Pad 13 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad13_reroll",
+   "name": "Pad 13 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad13_play",
+   "name": "Pad 13 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad14_name",
+   "name": "Pad 14",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad14_pill",
+   "name": "Pad 14 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad14_gain",
+   "name": "Pad 14 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad14_lock",
+   "name": "Pad 14 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad14_reroll",
+   "name": "Pad 14 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad14_play",
+   "name": "Pad 14 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad15_name",
+   "name": "Pad 15",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad15_pill",
+   "name": "Pad 15 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad15_gain",
+   "name": "Pad 15 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad15_lock",
+   "name": "Pad 15 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad15_reroll",
+   "name": "Pad 15 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad15_play",
+   "name": "Pad 15 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad16_name",
+   "name": "Pad 16",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad16_pill",
+   "name": "Pad 16 Pool",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "pad16_gain",
+   "name": "Pad 16 Gain",
+   "min": 0,
+   "max": 200,
+   "default": 100,
+   "unit": "%",
+   "display": "int"
+  },
+  {
+   "key": "pad16_lock",
+   "name": "Pad 16 Lock",
+   "options": [
+    "OFF",
+    "ON"
+   ],
+   "default": 0
+  },
+  {
+   "key": "pad16_reroll",
+   "name": "Pad 16 Reroll",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "pad16_play",
+   "name": "Pad 16 Play",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  }
+ ]
+}

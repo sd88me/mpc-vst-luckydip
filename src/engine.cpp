@@ -1,0 +1,629 @@
+/* Lucky Dip: the plugin engine (wrapper/engine.h). A 16-pad random drum-kit builder that plays its kit.
+ *
+ * Threads and what they may touch:
+ *   audio (render, usually midi)  only the lock-free pad buffers, pending triggers and the voices.
+ *   UI (set_param/get_param)      the kit (pads[]), under `mu`; never a disk read of audio, never a scan.
+ *   worker (one per instance)     decodes samples, writes exports; publishes buffers with an atomic swap.
+ *   scanner (on demand)           walks the sample folders, then swaps in the new shared library.
+ * Retired sample buffers are freed only after RETIRE_SECS, longer than the longest pad (MAX_FRAMES), so a voice
+ * still reading an old buffer never sees it freed. */
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <thread>
+#include <vector>
+#include <dirent.h>
+#include <sys/stat.h>
+extern "C" {
+#include "engine.h"       /* mpc-vst-plugins wrapper/engine.h, copied into vst/build/ by vst/build.sh */
+}
+#include "ld_audio.h"
+#include "ld_core.h"
+#include "ld_xpm.h"
+
+using namespace ld;
+
+namespace {
+
+const int RETIRE_SECS = 20;
+const char *const STATE_MAGIC = "LD1";
+
+/* ---- the sample library, shared by every instance in the process ---- */
+struct Shared {
+    std::mutex mu;
+    std::shared_ptr<Library> lib;            /* never null once initialised */
+    std::string roots_sig;                   /* which roots the library was scanned from */
+    bool scanning = false;
+    size_t scan_files = 0;
+    std::string prefs_path;
+    Shared() : lib(new Library) { lib->rebuild(); }
+};
+Shared &shared() { static Shared s; return s; }
+
+struct Config {
+    ScanOpts scan;
+    std::string export_dir;
+};
+
+std::string trim(const std::string &s) {
+    size_t a = 0, e = s.size();
+    while (a < e && (s[a] == ' ' || s[a] == '\t' || s[a] == '\r' || s[a] == '\n')) a++;
+    while (e > a && (s[e - 1] == ' ' || s[e - 1] == '\t' || s[e - 1] == '\r' || s[e - 1] == '\n')) e--;
+    return s.substr(a, e - a);
+}
+bool is_dir(const std::string &p) { struct stat s; return stat(p.c_str(), &s) == 0 && S_ISDIR(s.st_mode); }
+
+/* <data_dir>/luckydip.conf: root=<dir> (repeatable), export_dir=<dir>, skip_loops=0|1, max_mb=<n>,
+ * classify_filenames=0|1. Without any root=, the usual card layout is searched (/media/<card>/Expansions etc.). */
+Config load_config(const std::string &data_dir) {
+    Config c;
+    c.scan.skip_loops = true;
+    FILE *f = fopen((data_dir + "/luckydip.conf").c_str(), "r");
+    if (f) {
+        char line[1024];
+        while (fgets(line, sizeof line, f)) {
+            std::string s = trim(line);
+            if (s.empty() || s[0] == '#') continue;
+            size_t eq = s.find('=');
+            if (eq == std::string::npos) continue;
+            std::string k = trim(s.substr(0, eq)), v = trim(s.substr(eq + 1));
+            if (k == "root" && !v.empty()) c.scan.roots.push_back(v);
+            else if (k == "export_dir") c.export_dir = v;
+            else if (k == "skip_loops") c.scan.skip_loops = atoi(v.c_str()) != 0;
+            else if (k == "max_mb") c.scan.max_bytes = (int64_t)atof(v.c_str()) * 1024 * 1024;
+            else if (k == "classify_filenames") c.scan.classify_filenames = atoi(v.c_str()) != 0;
+        }
+        fclose(f);
+    }
+    if (c.scan.roots.empty()) {
+        DIR *d = opendir("/media");
+        std::vector<std::string> cards;
+        if (d) {
+            while (struct dirent *e = readdir(d)) if (e->d_name[0] != '.') cards.push_back(std::string("/media/") + e->d_name);
+            closedir(d);
+        }
+        std::sort(cards.begin(), cards.end());
+        const char *const subs[] = {"Expansions", "Samples"};
+        for (size_t i = 0; i < cards.size(); i++)
+            for (size_t k = 0; k < 2; k++)
+                if (is_dir(cards[i] + "/" + subs[k])) c.scan.roots.push_back(cards[i] + "/" + subs[k]);
+        if (is_dir("/sdcard/Samples")) c.scan.roots.push_back("/sdcard/Samples");
+    }
+    if (c.export_dir.empty()) {
+        std::string force = "/media/az01-internal-sd/Expansions/Kits & Patterns";   /* where a Force browses kits */
+        c.export_dir = is_dir(force) ? force : data_dir + "/kits";
+    }
+    return c;
+}
+
+std::string roots_signature(const ScanOpts &o) {
+    std::string s;
+    for (size_t i = 0; i < o.roots.size(); i++) s += o.roots[i] + "|";
+    s += o.skip_loops ? "L1" : "L0";
+    s += "m" + std::to_string((long long)o.max_bytes) + (o.classify_filenames ? "c1" : "c0");
+    return s;
+}
+
+/* index cache: line 1 "roots=<signature>", then "<cat>\t<source>\t<path>" per sample */
+bool load_cache(const std::string &path, const std::string &sig, Library &lib) {
+    FILE *f = fopen(path.c_str(), "r");
+    if (!f) return false;
+    std::string line;
+    char buf[4096];
+    bool first = true, ok = false;
+    while (fgets(buf, sizeof buf, f)) {
+        line = trim(buf);
+        if (first) { first = false; ok = line == "roots=" + sig; if (!ok) break; continue; }
+        size_t a = line.find('\t');
+        size_t b = a == std::string::npos ? a : line.find('\t', a + 1);
+        if (b == std::string::npos) continue;
+        Rec r;
+        r.cat = atoi(line.substr(0, a).c_str());
+        r.source = line.substr(a + 1, b - a - 1);
+        r.path = line.substr(b + 1);
+        if (r.cat >= 0 && r.cat < NCAT && !r.path.empty()) lib.recs.push_back(r);
+    }
+    fclose(f);
+    return ok;
+}
+void save_cache(const std::string &path, const std::string &sig, const Library &lib) {
+    std::string tmp = path + ".tmp";
+    FILE *f = fopen(tmp.c_str(), "w");
+    if (!f) return;
+    fprintf(f, "roots=%s\n", sig.c_str());
+    for (size_t i = 0; i < lib.recs.size(); i++)
+        fprintf(f, "%d\t%s\t%s\n", lib.recs[i].cat, lib.recs[i].source.c_str(), lib.recs[i].path.c_str());
+    fclose(f);
+    rename(tmp.c_str(), path.c_str());
+}
+void load_prefs(const std::string &path, Library &lib) {
+    FILE *f = fopen(path.c_str(), "r");
+    if (!f) return;
+    char buf[4096];
+    while (fgets(buf, sizeof buf, f)) {
+        std::string s = trim(buf);
+        if (s.size() < 3 || s[1] != '\t') continue;
+        if (s[0] == 'F') lib.favourites.insert(s.substr(2));
+        else if (s[0] == 'R') lib.rejects.insert(s.substr(2));
+    }
+    fclose(f);
+}
+void save_prefs(const std::string &path, const Library &lib) {
+    std::string tmp = path + ".tmp";
+    FILE *f = fopen(tmp.c_str(), "w");
+    if (!f) return;
+    for (std::set<std::string>::const_iterator i = lib.favourites.begin(); i != lib.favourites.end(); ++i) fprintf(f, "F\t%s\n", i->c_str());
+    for (std::set<std::string>::const_iterator i = lib.rejects.begin(); i != lib.rejects.end(); ++i) fprintf(f, "R\t%s\n", i->c_str());
+    fclose(f);
+    rename(tmp.c_str(), path.c_str());
+}
+
+std::string short_name(const std::string &path, size_t max) {
+    std::string b = base_name(path);
+    size_t d = b.find_last_of('.');
+    if (d != std::string::npos && d > 0) b = b.substr(0, d);
+    if (b.size() > max) b = b.substr(0, max - 1) + "~";
+    return b;
+}
+
+struct Job { enum Type { LOAD, EXPORT } type; int pad; std::string path; Pad pads[NPADS]; std::string dir, name; };
+
+struct Retired { Pcm *p; std::chrono::steady_clock::time_point at; };
+
+struct Inst {
+    std::string data_dir;
+    Config cfg;
+    std::string sig, cache_path;
+
+    std::mutex mu;                   /* pads[], status, export_name, sel, dup */
+    Pad pads[NPADS];
+    char loaded[NPADS];              /* 0 none, 1 playable, 2 failed to decode */
+    float rms[NPADS];
+    int sel = 0;
+    bool prevent_dup = true;
+    std::string status, export_name;
+    uint32_t seed_ctr = 0;
+
+    std::atomic<Pcm *> buf[NPADS];
+    std::atomic<int> pending[NPADS]; /* note-on velocity waiting for the audio thread */
+    struct Voice { const Pcm *p; uint32_t pos; float amp; } voice[NPADS];
+
+    std::mutex jmu, gmu;             /* job queue; graveyard */
+    std::condition_variable jcv;
+    std::deque<Job> jobs;
+    std::vector<Retired> grave;
+    std::thread worker, scanner;
+    volatile bool stop;
+    std::atomic<bool> scan_running;
+
+    Inst() : stop(false), scan_running(false) {
+        memset(loaded, 0, sizeof loaded);
+        for (int i = 0; i < NPADS; i++) { rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
+    }
+
+    void set_status(const std::string &s) { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); }
+    uint32_t new_seed() {
+        uint64_t t = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
+        uint32_t s = (uint32_t)(t ^ (t >> 32)) * 2654435761u + (++seed_ctr) * 40503u + (uint32_t)time(0);
+        return s ? s : 1;
+    }
+    void retire(Pcm *p) {
+        if (!p) return;
+        std::lock_guard<std::mutex> l(gmu);
+        Retired r; r.p = p; r.at = std::chrono::steady_clock::now();
+        grave.push_back(r);
+    }
+    void reap(bool all) {
+        std::lock_guard<std::mutex> l(gmu);
+        std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+        for (size_t i = 0; i < grave.size();) {
+            if (all || now - grave[i].at > std::chrono::seconds(RETIRE_SECS)) { delete grave[i].p; grave.erase(grave.begin() + i); }
+            else i++;
+        }
+    }
+    void push(const Job &j) { { std::lock_guard<std::mutex> l(jmu); jobs.push_back(j); } jcv.notify_one(); }
+
+    /* queue a decode for every pad whose sample isn't playable yet (caller holds mu) */
+    void queue_loads_locked() {
+        for (int i = 0; i < NPADS; i++) {
+            if (!pads[i].has || loaded[i] != 0) continue;
+            Job j; j.type = Job::LOAD; j.pad = i; j.path = pads[i].sample.path;
+            push(j);
+        }
+    }
+    void drop_pad_locked(int i) {
+        loaded[i] = 0; rms[i] = 0;
+        retire(buf[i].exchange(0));
+    }
+
+    void worker_main() {
+        for (;;) {
+            Job j; bool have = false;
+            {
+                std::unique_lock<std::mutex> l(jmu);
+                if (jobs.empty() && !stop) jcv.wait_for(l, std::chrono::seconds(2));
+                if (stop) return;
+                if (!jobs.empty()) { j = jobs.front(); jobs.pop_front(); have = true; }
+            }
+            reap(false);
+            if (!have) continue;
+            if (j.type == Job::LOAD) do_load(j); else do_export(j);
+        }
+    }
+    void do_load(const Job &j) {
+        Pcm *p = new Pcm;
+        bool ok = decode(j.path, *p);
+        std::lock_guard<std::mutex> l(mu);
+        if (!pads[j.pad].has || pads[j.pad].sample.path != j.path) { delete p; return; }   /* superseded */
+        if (!ok) { delete p; loaded[j.pad] = 2; return; }
+        rms[j.pad] = p->rms;
+        retire(buf[j.pad].exchange(p));
+        loaded[j.pad] = 1;
+    }
+    void do_export(const Job &j) {
+        ExportResult r = export_xpm(j.dir, j.name, j.pads);
+        std::lock_guard<std::mutex> l(mu);
+        if (r.ok) { export_name = j.name; status = r.warnings.empty() ? "Exported OK" : "Exported (see log)"; }
+        else status = "Export failed";
+        if (!r.ok) fprintf(stderr, "luckydip: export failed: %s\n", r.error.c_str());
+        for (size_t i = 0; i < r.warnings.size(); i++) fprintf(stderr, "luckydip: export: %s\n", r.warnings[i].c_str());
+    }
+
+    /* ---- library ---- */
+    void start_scan(bool force) {
+        Shared &sh = shared();
+        {
+            std::lock_guard<std::mutex> l(sh.mu);
+            if (sh.scanning) return;
+            sh.scanning = true; sh.scan_files = 0;
+        }
+        if (scanner.joinable()) scanner.join();
+        scan_running = true;
+        set_status("Scanning...");
+        scanner = std::thread([this, force] { scan_main(force); });
+    }
+    void scan_main(bool force) {
+        Shared &sh = shared();
+        std::shared_ptr<Library> nl(new Library);
+        bool cached = !force && load_cache(cache_path, sig, *nl);
+        if (!cached) {
+            nl->recs.clear();
+            Classifier cl;
+            ScanStats st;
+            scan_library(cfg.scan, cl, nl->recs, st, &stop);
+            if (!stop) save_cache(cache_path, sig, *nl);
+        }
+        nl->rebuild();
+        std::string msg;
+        {
+            std::lock_guard<std::mutex> l(sh.mu);
+            if (!stop) {
+                load_prefs(sh.prefs_path, *nl);
+                sh.lib = nl; sh.roots_sig = sig;
+            }
+            sh.scanning = false;
+            msg = sh.lib->recs.empty() ? "No samples found" : "Library: " + std::to_string(sh.lib->recs.size()) + " samples";
+        }
+        if (!stop) set_status(msg);
+        scan_running = false;
+    }
+
+    /* ---- kit actions (UI thread) ---- */
+    void generate() {
+        Shared &sh = shared();
+        uint32_t seed = new_seed();
+        AssignResult r;
+        {
+            std::lock_guard<std::mutex> l(sh.mu);
+            std::lock_guard<std::mutex> l2(mu);
+            if (sh.lib->recs.empty()) { status = sh.scanning ? "Scanning..." : "No samples found"; return; }
+            std::string before[NPADS];
+            for (int i = 0; i < NPADS; i++) before[i] = pads[i].has ? pads[i].sample.path : "";
+            r = assign_kit(pads, *sh.lib, seed, prevent_dup);
+            for (int i = 0; i < NPADS; i++)
+                if (pads[i].has && pads[i].sample.path != before[i]) drop_pad_locked(i);
+            queue_loads_locked();
+            status = r.unresolved ? "Kit: " + std::to_string(NPADS - r.unresolved) + "/16 pads" : "Kit generated";
+        }
+    }
+    void reroll(int i) {
+        Shared &sh = shared();
+        std::lock_guard<std::mutex> l(sh.mu);
+        std::lock_guard<std::mutex> l2(mu);
+        if (pads[i].locked) { status = "Pad " + std::to_string(i + 1) + " is locked"; return; }
+        if (sh.lib->recs.empty()) { status = "No samples found"; return; }
+        std::string before = pads[i].has ? pads[i].sample.path : "";
+        if (reroll_pad(pads, i, *sh.lib, new_seed(), prevent_dup)) {
+            if (pads[i].sample.path != before) drop_pad_locked(i);
+            queue_loads_locked();
+            status = "Pad " + std::to_string(i + 1) + " rerolled";
+        } else status = "No sample for pad " + std::to_string(i + 1);
+    }
+    void clear_pad(int i) {
+        std::lock_guard<std::mutex> l(mu);
+        if (pads[i].locked) { status = "Pad " + std::to_string(i + 1) + " is locked"; return; }
+        pads[i].has = false; pads[i].sample.path.clear();
+        drop_pad_locked(i);
+        status = "Pad " + std::to_string(i + 1) + " cleared";
+    }
+    void clear_all() {
+        std::lock_guard<std::mutex> l(mu);
+        for (int i = 0; i < NPADS; i++) if (!pads[i].locked) { pads[i].has = false; pads[i].sample.path.clear(); drop_pad_locked(i); }
+        status = "Cleared";
+    }
+    void unlock_all() {
+        std::lock_guard<std::mutex> l(mu);
+        for (int i = 0; i < NPADS; i++) pads[i].locked = false;
+        status = "Unlocked all";
+    }
+    void normalise() {
+        std::lock_guard<std::mutex> l(mu);
+        float g[NPADS], r[NPADS];
+        for (int i = 0; i < NPADS; i++) r[i] = pads[i].has && loaded[i] == 1 ? rms[i] : 0.0f;
+        match_gains(r, g);
+        for (int i = 0; i < NPADS; i++) pads[i].gain = g[i];
+        status = "Levels matched";
+    }
+    void do_export_req() {
+        std::lock_guard<std::mutex> l(mu);
+        Job j; j.type = Job::EXPORT; j.pad = 0;
+        int n = 0;
+        for (int i = 0; i < NPADS; i++) { j.pads[i] = pads[i]; n += pads[i].has; }
+        if (!n) { status = "Nothing to export"; return; }
+        time_t t = time(0); struct tm tmv;
+        localtime_r(&t, &tmv);
+        char nm[48];
+        strftime(nm, sizeof nm, "LuckyDip-%m%d-%H%M%S", &tmv);
+        j.name = nm; j.dir = cfg.export_dir;
+        push(j);
+        status = "Exporting...";
+    }
+    void favourite_reject(int i, bool reject) {
+        Shared &sh = shared();
+        std::string path;
+        { std::lock_guard<std::mutex> l(mu); if (!pads[i].has) return; path = pads[i].sample.path; }
+        std::lock_guard<std::mutex> l(sh.mu);
+        /* mutually exclusive per sample, as in the web UI */
+        sh.lib->favourites.erase(path); sh.lib->rejects.erase(path);
+        (reject ? sh.lib->rejects : sh.lib->favourites).insert(path);
+        save_prefs(sh.prefs_path, *sh.lib);
+        std::lock_guard<std::mutex> l2(mu);
+        status = reject ? "Rejected" : "Favourited";
+    }
+    void trigger(int pad, int vel) { if (pad >= 0 && pad < NPADS) pending[pad] = vel; }
+
+    /* ---- state ---- */
+    std::string get_state() {
+        std::lock_guard<std::mutex> l(mu);
+        std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel) + "\ndup=" + (prevent_dup ? "1" : "0") + "\n";
+        for (int i = 0; i < NPADS; i++) {
+            const Pad &p = pads[i];
+            char head[96];
+            snprintf(head, sizeof head, "pad\t%d\t%d\t%u\t%d\t%.3f\t", i, p.locked ? 1 : 0, (unsigned)p.pool, p.has ? p.sample.cat : 0, p.gain);
+            std::string line = std::string(head) + (p.has ? p.sample.path : "") + "\n";
+            if (s.size() + line.size() > 7800) break;     /* the host's chunk buffer is 8 KiB: later pads are dropped, never half-written */
+            s += line;
+        }
+        return s;
+    }
+    void set_state(const char *text) {
+        std::lock_guard<std::mutex> l(mu);
+        std::string s = text;
+        size_t pos = 0;
+        bool first = true;
+        while (pos < s.size()) {
+            size_t e = s.find('\n', pos);
+            if (e == std::string::npos) e = s.size();
+            std::string line = s.substr(pos, e - pos);
+            pos = e + 1;
+            if (first) { first = false; if (line != STATE_MAGIC) return; continue; }
+            if (line.compare(0, 4, "sel=") == 0) sel = std::max(0, std::min(NPADS - 1, atoi(line.c_str() + 4)));
+            else if (line.compare(0, 4, "dup=") == 0) prevent_dup = atoi(line.c_str() + 4) != 0;
+            else if (line.compare(0, 4, "pad\t") == 0) {
+                /* pad \t idx \t locked \t pool \t cat \t gain \t path */
+                std::vector<std::string> f;
+                size_t a = 0;
+                while (f.size() < 6) {
+                    size_t t = line.find('\t', a);
+                    if (t == std::string::npos) break;
+                    f.push_back(line.substr(a, t - a));
+                    a = t + 1;
+                }
+                if (f.size() < 6) continue;
+                std::string path = line.substr(a);
+                int i = atoi(f[1].c_str());
+                if (i < 0 || i >= NPADS) continue;
+                Pad &p = pads[i];
+                p.locked = atoi(f[2].c_str()) != 0;
+                p.pool = (uint32_t)strtoul(f[3].c_str(), 0, 10) & ((1u << NCAT) - 1);
+                p.gain = (float)atof(f[5].c_str());
+                if (!(p.gain >= 0 && p.gain <= 2)) p.gain = 1;
+                p.has = !path.empty();
+                p.sample.path = path;
+                p.sample.cat = std::max(0, std::min(NCAT - 1, atoi(f[4].c_str())));
+                drop_pad_locked(i);
+            }
+        }
+        queue_loads_locked();
+    }
+};
+
+/* "pad7_gain" -> pad 6, field "gain"; "sel_gain" -> the selected pad. false if not a pad key. */
+bool split_key(Inst *in, const char *key, int *pad, const char **field) {
+    if (!strncmp(key, "sel_", 4)) { *pad = in->sel; *field = key + 4; return true; }
+    if (!strncmp(key, "pad", 3) && key[3] >= '0' && key[3] <= '9') {
+        char *end;
+        long n = strtol(key + 3, &end, 10);
+        if (*end != '_' || n < 1 || n > NPADS) return false;
+        *pad = (int)n - 1; *field = end + 1;
+        return true;
+    }
+    return false;
+}
+
+void *e_create(const char *data_dir) {
+    Inst *in = new Inst;
+    in->data_dir = data_dir && *data_dir ? data_dir : "/tmp/luckydip";
+    make_dirs(in->data_dir);
+    in->cfg = load_config(in->data_dir);
+    in->sig = roots_signature(in->cfg.scan);
+    in->cache_path = in->data_dir + "/index.cache";
+    in->status = "Starting...";
+    Shared &sh = shared();
+    bool need_scan = false;
+    {
+        std::lock_guard<std::mutex> l(sh.mu);
+        if (sh.prefs_path.empty()) sh.prefs_path = in->data_dir + "/prefs.txt";
+        need_scan = sh.lib->recs.empty() || sh.roots_sig != in->sig;
+    }
+    in->worker = std::thread([in] { in->worker_main(); });
+    if (need_scan) in->start_scan(false);
+    else in->set_status("Library: " + std::to_string(sh.lib->recs.size()) + " samples");
+    return in;
+}
+
+void e_destroy(void *h) {
+    Inst *in = (Inst *)h;
+    in->stop = true;
+    in->jcv.notify_all();
+    if (in->scanner.joinable()) in->scanner.join();
+    if (in->worker.joinable()) in->worker.join();
+    for (int i = 0; i < NPADS; i++) delete in->buf[i].exchange(0);
+    in->reap(true);
+    delete in;
+}
+
+void e_midi(void *h, const uint8_t *msg, int len) {
+    Inst *in = (Inst *)h;
+    if (len < 3 || (msg[0] & 0xF0) != 0x90 || msg[2] == 0) return;
+    int n = msg[1], pad = -1;
+    if (n < NPADS) pad = n;                      /* the drum-pad layout sends pad n as note n-1 */
+    else if (n >= 36 && n < 36 + NPADS) pad = n - 36;
+    if (pad >= 0) in->trigger(pad, msg[2]);
+}
+
+bool is_on(const char *v) { return atof(v) > 0.5; }
+
+void e_set_param(void *h, const char *key, const char *val) {
+    Inst *in = (Inst *)h;
+    if (!strcmp(key, "state")) { in->set_state(val); return; }
+    if (!strcmp(key, "generate")) { if (is_on(val)) in->generate(); return; }
+    if (!strcmp(key, "clear_all")) { if (is_on(val)) in->clear_all(); return; }
+    if (!strcmp(key, "unlock_all")) { if (is_on(val)) in->unlock_all(); return; }
+    if (!strcmp(key, "normalise")) { if (is_on(val)) in->normalise(); return; }
+    if (!strcmp(key, "export")) { if (is_on(val)) in->do_export_req(); return; }
+    if (!strcmp(key, "rescan")) { if (is_on(val)) in->start_scan(true); return; }
+    if (!strcmp(key, "prevent_dup")) { std::lock_guard<std::mutex> l(in->mu); in->prevent_dup = is_on(val); return; }
+    if (!strcmp(key, "sel_pad")) {
+        std::lock_guard<std::mutex> l(in->mu);
+        in->sel = std::max(0, std::min(NPADS - 1, (int)(atof(val) + 0.5) - 1));
+        return;
+    }
+    int pad; const char *f;
+    if (!split_key(in, key, &pad, &f)) return;
+    if (!strcmp(f, "gain")) { std::lock_guard<std::mutex> l(in->mu); in->pads[pad].gain = (float)std::max(0.0, std::min(200.0, atof(val))) / 100.0f; }
+    else if (!strcmp(f, "lock")) { std::lock_guard<std::mutex> l(in->mu); in->pads[pad].locked = is_on(val); }
+    else if (!strncmp(f, "cat_", 4)) {      /* sel_cat_<name>: one category in/out of the pad's pool */
+        for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) {
+            std::lock_guard<std::mutex> l(in->mu);
+            if (is_on(val)) in->pads[pad].pool |= 1u << k; else in->pads[pad].pool &= ~(1u << k);
+        }
+    }
+    else if (!strcmp(f, "reroll")) { if (is_on(val)) in->reroll(pad); }
+    else if (!strcmp(f, "clear")) { if (is_on(val)) in->clear_pad(pad); }
+    else if (!strcmp(f, "play")) { if (is_on(val)) in->trigger(pad, 100); }
+    else if (!strcmp(f, "fav")) { if (is_on(val)) in->favourite_reject(pad, false); }
+    else if (!strcmp(f, "reject")) { if (is_on(val)) in->favourite_reject(pad, true); }
+}
+
+int put(char *buf, int n, const std::string &s) { snprintf(buf, n, "%s", s.c_str()); return (int)strlen(buf) + 1; }
+
+int e_get_param(void *h, const char *key, char *buf, int n) {
+    Inst *in = (Inst *)h;
+    if (n <= 0) return 0;
+    size_t kl = strlen(key);
+    if (kl > 3 && !strcmp(key + kl - 3, "_on")) return 0;   /* the wrapper polls these from the audio thread: no lock */
+    if (!strcmp(key, "state")) return put(buf, n, in->get_state());
+    std::lock_guard<std::mutex> l(in->mu);
+    if (!strcmp(key, "status")) return put(buf, n, in->status);
+    if (!strcmp(key, "export_name")) return put(buf, n, in->export_name.empty() ? "-" : in->export_name);
+    if (!strcmp(key, "prevent_dup")) return put(buf, n, in->prevent_dup ? "1" : "0");
+    if (!strcmp(key, "sel_pad")) return put(buf, n, std::to_string(in->sel + 1));
+    int pad; const char *f;
+    if (!split_key(in, key, &pad, &f)) return 0;
+    const Pad &p = in->pads[pad];
+    if (!strcmp(f, "name") || !strcmp(f, "name_full")) {
+        if (!p.has) return put(buf, n, "(empty)");
+        std::string s = short_name(p.sample.path, 23);
+        if (in->loaded[pad] == 2) s = "! " + short_name(p.sample.path, 21);
+        return put(buf, n, s);
+    }
+    if (!strncmp(f, "cat_", 4)) {
+        for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) return put(buf, n, (p.pool >> k) & 1 ? "1" : "0");
+        return 0;
+    }
+    if (!strcmp(f, "cat")) return put(buf, n, p.has ? CAT_NAME[p.sample.cat] : "-");
+    if (!strcmp(f, "pill")) {
+        std::string s = p.has ? CAT_SHORT[p.sample.cat] : "-";
+        if (p.pool) {       /* an override: the first chosen category, "+" when several */
+            int first = 0, cnt = 0;
+            for (int k = NCAT - 1; k >= 0; k--) if ((p.pool >> k) & 1) { first = k; cnt++; }
+            s = std::string(CAT_SHORT[first]) + (cnt > 1 ? "+" : "");
+        }
+        return put(buf, n, std::string(p.locked ? "L:" : "") + s);
+    }
+    if (!strcmp(f, "gain")) return put(buf, n, std::to_string((int)(p.gain * 100.0f + 0.5f)));
+    if (!strcmp(f, "lock")) return put(buf, n, p.locked ? "1" : "0");
+        if (!strcmp(f, "reroll") || !strcmp(f, "play") || !strcmp(f, "clear") || !strcmp(f, "fav") || !strcmp(f, "reject")) return put(buf, n, "0");
+    return 0;
+}
+
+void e_render(void *h, int16_t *out, int frames) {
+    Inst *in = (Inst *)h;
+    for (int p = 0; p < NPADS; p++) {
+        int v = in->pending[p].exchange(0);
+        if (!v) continue;
+        const Pcm *pcm = in->buf[p].load();
+        if (!pcm) continue;
+        float g;
+        { /* the gain is a plain float written by the UI thread: a torn read is harmless, a lock here is not allowed */
+            g = in->pads[p].gain;
+        }
+        in->voice[p].p = pcm; in->voice[p].pos = 0; in->voice[p].amp = (v / 127.0f) * g;
+    }
+    float mix[256 * 2];
+    int n = frames > 256 ? 256 : frames;
+    memset(mix, 0, sizeof(float) * n * 2);
+    for (int p = 0; p < NPADS; p++) {
+        Inst::Voice &vo = in->voice[p];
+        if (!vo.p) continue;
+        uint32_t total = vo.p->frames();
+        const int16_t *s = &vo.p->lr[0];
+        int k = 0;
+        for (; k < n && vo.pos < total; k++, vo.pos++) {
+            mix[k * 2] += s[vo.pos * 2] * vo.amp;
+            mix[k * 2 + 1] += s[vo.pos * 2 + 1] * vo.amp;
+        }
+        if (vo.pos >= total) vo.p = 0;
+    }
+    for (int i = 0; i < n * 2; i++) {
+        float x = mix[i];
+        out[i] = (int16_t)(x > 32767.0f ? 32767 : x < -32768.0f ? -32768 : x);
+    }
+    for (int i = n * 2; i < frames * 2; i++) out[i] = 0;
+}
+
+const mpc_engine_t ENGINE = {e_create, e_destroy, e_midi, e_set_param, e_get_param, e_render, 0};
+
+}  // namespace
+
+extern "C" const mpc_engine_t *mpc_engine(void) { return &ENGINE; }

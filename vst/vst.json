@@ -1,0 +1,26 @@
+{
+  "name": "Lucky Dip",
+  "vendor": "sd88me",
+  "uid": "LkDp",
+  "version": 1000,
+  "so": "lucky_dip.so",
+  "params": "params.json",
+  "defines": {
+    "MODULE_SUBDIR": "\"luckydip\""
+  },
+  "build": {
+    "root": "..",
+    "sources": [
+      "src/engine.cpp"
+    ],
+    "cflags": [
+      "-Isrc",
+      "-std=gnu++11",
+      "-pthread"
+    ],
+    "libs": [
+      "-pthread"
+    ]
+  },
+  "layout": "layout.conf"
+}
