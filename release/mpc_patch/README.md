@@ -19,5 +19,5 @@ patched with the other one must be uninstalled with its own `.patch` file first.
 (`arm-linux-gnueabihf-as`/`ld`). How the patch works, and what was tried: the Machinemodule repo's
 `docs/HANDOFF-mpc-drum-pads.md`.
 
-Status: `names.S` and `helper.S` are assembled and disassembled offline; **the generated patch has not yet been built or
-tested on a device.**
+Status: `mpc-3.9.1.2.patch` is generated (patched md5 `31ef0968b9d577d9a207e986700b0101`) and its regions were disassembled from the patched
+file; **it has not been installed or tested on a device yet.**
