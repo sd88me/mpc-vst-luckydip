@@ -29,8 +29,13 @@ project save/reload, export loading in the Force's browser.
 - **AIFF** decodes for playback; the XPM still gets the `.aif` copy and a warning (the MPC loads `<name>.wav`).
 - Reject does not reroll the pad by itself (as in the web UI); press Reroll.
 - Pads are one-shots (note-off ignored), one voice per pad, retrigger restarts. At most 15 s per pad is held in memory.
-- The folder pickers of the web UI have no equivalent in a plugin: sample and export folders come from
-  `luckydip.conf` (see README). A Library enum listing `/media/*` folders is an obvious next step.
+- The web UI's folder pickers have no equivalent in a plugin (no text entry or file browser in a skin). The SETTINGS
+  page has Source and Export steppers over folders discovered on the cards (scanner thread), saved in the chunk;
+  `luckydip.conf` still sets what "Default" means.
+- The scan classifies with the root folder's own name as a folder component (the JS only saw names below a root), so a
+  chosen `Kicks` folder classifies as kick. Exported `LuckyDip-*` folders are skipped when scanning.
+- A scan request while one of this instance's scans runs is queued (a project load sets the saved source right after
+  create() started the first scan). Instances share one library: two instances with different sources fight over it.
 
 ## Open issues
 - **Async text does not refresh.** The wrapper only calls `audioMasterUpdateDisplay` after a `setParameter`, so a

@@ -54,7 +54,7 @@ int main() {
     char tmpl[] = "/tmp/ldtestXXXXXX";
     std::string root = mkdtemp(tmpl);
     std::string wav = make_wav(1, 16, 44100, 4410);
-    const char *files[] = {"Kicks/k1.wav", "Kicks/k2.wav", "Snares/s1.wav", "Snares/s2.wav", "Hats/Closed Hats/c1.wav", "Misc/Loop 120 bpm.wav", "Fx/f1.wav", "Synth/pad1.wav", "Claps/cl1.wav", ".hidden/x.wav", "Kicks/notes.txt"};
+    const char *files[] = {"Kicks/k1.wav", "Kicks/k2.wav", "Snares/s1.wav", "Snares/s2.wav", "Hats/Closed Hats/c1.wav", "LuckyDip-0101-000000/k1.wav", "Misc/Loop 120 bpm.wav", "Fx/f1.wav", "Synth/pad1.wav", "Claps/cl1.wav", ".hidden/x.wav", "Kicks/notes.txt"};
     for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) wr(root + "/" + files[i], wav);
     ScanOpts so; so.roots.push_back(root);
     Library lib; ScanStats st;

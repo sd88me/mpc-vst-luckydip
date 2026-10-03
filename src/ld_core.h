@@ -230,7 +230,11 @@ inline void scan_library(const ScanOpts &o, const Classifier &cl, std::vector<Re
         struct stat rs;
         if (root.empty() || stat(root.c_str(), &rs) != 0 || !S_ISDIR(rs.st_mode)) continue;
         std::vector<Item> stack;
-        stack.push_back(Item{root, std::vector<std::string>()});
+        /* the root folder's own name counts as a folder component, so choosing "Kicks" itself as the source still classifies
+         * its samples as kicks (the JS original only ever saw names below the roots) */
+        size_t rsl = root.find_last_of('/');
+        std::string rname = rsl == std::string::npos ? root : root.substr(rsl + 1);
+        stack.push_back(Item{root, std::vector<std::string>(1, rname)});
         while (!stack.empty()) {
             if (stop && *stop) return;
             Item it = stack.back(); stack.pop_back();
@@ -249,7 +253,8 @@ inline void scan_library(const ScanOpts &o, const Classifier &cl, std::vector<Re
                 struct stat s;
                 if (lstat(full.c_str(), &s) != 0 || S_ISLNK(s.st_mode)) continue;
                 if (S_ISDIR(s.st_mode)) {
-                    if ((int)it.rel.size() < o.max_depth) {
+                    if (names[i].compare(0, 9, "LuckyDip-") == 0) continue;   /* our own exported kits are not source material */
+                    if ((int)it.rel.size() <= o.max_depth) {
                         Item n; n.dir = full; n.rel = it.rel; n.rel.push_back(names[i]);
                         stack.push_back(n);
                     }

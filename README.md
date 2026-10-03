@@ -12,7 +12,7 @@ pass (see `docs/NOTES.md`).
 ## Using it
 Insert **Lucky Dip** as a track instrument. Pads answer MIDI notes 0-15 (the 16-pad drum layout) and 36-51.
 
-- **PADS page**: per pad, the sample name, its category, PLAY, REROLL and LOCK. Q-Links 1-16 are the pad gains.
+- **PADS 1-8 / PADS 9-16**: per pad, the sample name, its category, PLAY, REROLL, LOCK and a GAIN knob (Q-Links 1-8).
 - **DETAIL page**: the category matrix for the selected pad (tap categories to build the pool it draws from; none =
   the default pool for that pad slot), the pad stepper, gain, lock, clear, reroll, favourite/reject, and the kit
   actions: **Generate All**, **Clear All**, **Normalise** (match levels), **Rescan Library**, **Export Kit**.
@@ -20,17 +20,24 @@ Insert **Lucky Dip** as a track instrument. Pads answer MIDI notes 0-15 (the 16-
   never drawn again (library-wide, kept in `prefs.txt`).
 - The kit is saved with the project.
 
-### Sample folders and export folder
-Edit `luckydip/luckydip.conf` inside the plugin folder (created on first run next to the plugin):
+### Sample folders and export folder (SETTINGS page)
+- **Sample source** (stepper): *Default (auto)* or one folder found on your cards: the folders directly under each
+  `/media/<card>/`, every pack inside an `Expansions` folder, and the top level of `/sdcard`. Press **Rescan** after
+  changing it. Choosing a category folder (say a pack's `Kicks`) works: the folder's own name is used to classify.
+- **Export folder** (stepper): same list. Kits are saved as `<folder>/LuckyDip-MMDD-HHMMSS/` (the `.xpm`, the samples
+  beside it and a `MANIFEST.txt`). Lucky Dip's own exported kits are never scanned as source material.
+- **Library** shows the sample count; **No Duplicates** and **Unlock All** live here too.
+- Both choices are saved with the project.
+
+*Default (auto)*: scan `/media/<card>/Expansions` and `/media/<card>/Samples` (and `/sdcard/Samples`) and export to
+`/media/<card>/Expansions/Kits & Patterns` (the folder a Force browses kits from), else `<plugin folder>/luckydip/kits`.
+For anything the stepper can't reach, edit `luckydip/luckydip.conf` in the plugin folder (it sets what *Default* means):
 ```
-root=/media/<card>/My Samples      # repeatable; without any root= the card layout is searched
-export_dir=/media/<card>/Expansions/Kits & Patterns
+root=/media/<card>/My Samples      # repeatable
+export_dir=/media/<card>/My Kits
 skip_loops=1                       # skip files that look like loops (default)
 max_mb=5                           # skip files bigger than this (default: no cap)
 ```
-Without a `root=`, every `/media/<card>/Expansions` and `/media/<card>/Samples` (and `/sdcard/Samples`) is scanned.
-Press Rescan after changing it. Exports go to `<export_dir>/LuckyDip-MMDD-HHMMSS/` (the `.xpm`, the samples beside it
-and a `MANIFEST.txt`); the Force's own browser loads them from `Expansions/Kits & Patterns`.
 
 ## Build
 Self-contained: the plugin toolchain from mpc-vst-plugins is vendored in `vendor/mpc-vst/` (`VENDORED.md`).

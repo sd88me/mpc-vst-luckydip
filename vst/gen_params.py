@@ -32,6 +32,10 @@ for i in range(1, 17):
     toggle("pad%d_lock" % i, "Pad %d Lock" % i)
     trig("pad%d_reroll" % i, "Pad %d Reroll" % i)
     trig("pad%d_play" % i, "Pad %d Play" % i)
+# settings (SETTINGS page): appended after the pad blocks so existing indices never move
+text("src_name", "Sample Source"); trig("src_prev", "Source Prev"); trig("src_next", "Source Next")
+text("exp_name", "Export Folder"); trig("exp_prev", "Export Prev"); trig("exp_next", "Export Next")
+text("lib_info", "Library")
 out = os.path.join(os.path.dirname(os.path.abspath(__file__)), "params.json")
 json.dump({"name": "Lucky Dip", "params": P}, open(out, "w"), indent=1)
 print("%d params -> %s" % (len(P), out))

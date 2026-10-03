@@ -110,6 +110,25 @@ int main() {
     std::vector<uint8_t> xb;
     CHECK(ld::read_file(root + "/kits/" + get(h, "export_name") + "/" + get(h, "export_name") + ".xpm", xb), "xpm written");
 
+    /* settings: a saved source/export folder is applied, a scan follows, exports skip nothing but land where chosen */
+    CHECK(get(h, "src_name") == "Default (auto)" && get(h, "lib_info") == "15 samples", "default source: %s / %s", get(h, "src_name").c_str(), get(h, "lib_info").c_str());
+    std::string st2 = get(h, "state");
+    CHECK(st2.find("\nsrc=\n") != std::string::npos, "state records the default source");
+    void *h3 = E->create(data.c_str());
+    E->set_param(h3, "state", ("LD1\nsrc=" + lib + "/Kicks\nexp=" + root + "/chosen\n").c_str());
+    CHECK(wait_for(h3, "status", "Library: 3"), "saved source triggers a scan of just that folder: \"%s\"", get(h3, "status").c_str());
+    CHECK(get(h3, "lib_info") == "3 samples", "lib_info %s", get(h3, "lib_info").c_str());
+    CHECK(get(h3, "src_name").find("Kicks") != std::string::npos && get(h3, "exp_name").find("chosen") != std::string::npos, "labels: %s | %s", get(h3, "src_name").c_str(), get(h3, "exp_name").c_str());
+    trig(h3, "generate");
+    int k3 = 0; for (int i = 1; i <= 16; i++) k3 += get(h3, ("pad" + std::to_string(i) + "_name").c_str()) != "(empty)";
+    CHECK(k3 > 0 && get(h3, "pad1_pill") == "KICK" && get(h3, "pad2_name") == "(empty)", "only kicks to draw from: %d pads, pad1 %s/%s, pad2 %s", k3, get(h3, "pad1_pill").c_str(), get(h3, "pad1_name").c_str(), get(h3, "pad2_name").c_str());
+    trig(h3, "export");
+    CHECK(wait_for(h3, "status", "Exported"), "export: \"%s\"", get(h3, "status").c_str());
+    std::vector<uint8_t> xb3;
+    CHECK(ld::read_file(root + "/chosen/" + get(h3, "export_name") + "/" + get(h3, "export_name") + ".xpm", xb3), "xpm landed in the chosen export folder");
+    trig(h3, "src_next");
+    CHECK(get(h3, "status").compare(0, 6, "Source") == 0, "stepping the source says to rescan: \"%s\"", get(h3, "status").c_str());
+    E->destroy(h3);
     E->destroy(h2);
     E->destroy(h);      /* joins the worker and scanner threads; ASan checks nothing leaks or races a freed buffer */
     std::string cmd = "rm -rf " + root; if (system(cmd.c_str())) {}

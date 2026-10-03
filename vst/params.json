@@ -1101,6 +1101,55 @@
    "min": 0,
    "max": 1,
    "momentary": true
+  },
+  {
+   "key": "src_name",
+   "name": "Sample Source",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "src_prev",
+   "name": "Source Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "src_next",
+   "name": "Source Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_name",
+   "name": "Export Folder",
+   "min": 0,
+   "max": 0,
+   "display": "string"
+  },
+  {
+   "key": "exp_prev",
+   "name": "Export Prev",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "exp_next",
+   "name": "Export Next",
+   "min": 0,
+   "max": 1,
+   "momentary": true
+  },
+  {
+   "key": "lib_info",
+   "name": "Library",
+   "min": 0,
+   "max": 0,
+   "display": "string"
   }
  ]
 }

@@ -79,4 +79,18 @@ o += ['button  cx=1070 cy=163 label="GENERATE ALL" key=generate color=ff2e7e',
       'button  cx=820 cy=639 label="FAV" key=sel_fav color=ff2e7e',
       'button  cx=960 cy=639 label="REJECT" key=sel_reject color=e8323c',
       'qlinks "DETAIL" = sel_gain,sel_pad,sel_lock,sel_reroll,sel_clear,sel_play,sel_fav,sel_reject,generate,clear_all,normalise,export,rescan']
+o += ["", "[tab SETTINGS]", BG, "art file=images/banner.svg x=0 y=86 w=1280 h=70",
+      'readout cx=905 cy=121 w=640 h=40 label="" key=status get=status',
+      'frame   x=20 y=168 w=1240 h=150 title="SAMPLE SOURCE" img=images/panel_src.svg',
+      'stepper cx=560 cy=250 w=880 h=48 label="" key=src_name prev=src_prev next=src_next get=src_name',
+      'text    cx=640 cy=298 label="Which folder to draw samples from. Press RESCAN after changing it."',
+      'button  cx=1140 cy=250 label="RESCAN" key=rescan color=10a8a0',
+      'frame   x=20 y=330 w=1240 h=150 title="EXPORT FOLDER" img=images/panel_exp.svg',
+      'stepper cx=560 cy=412 w=880 h=48 label="" key=exp_name prev=exp_prev next=exp_next get=exp_name',
+      'text    cx=640 cy=460 label="Kits are saved here as LuckyDip-MMDD-HHMMSS (the .xpm and its samples)."',
+      'frame   x=20 y=492 w=1240 h=150 title="LIBRARY" img=images/panel_lib.svg',
+      'readout cx=240 cy=574 w=300 h=44 label="" key=lib_info get=lib_info',
+      'toggle  cx=560 cy=570 label="NO DUPLICATES" key=prevent_dup',
+      'button  cx=860 cy=574 label="UNLOCK ALL" key=unlock_all color=8a3df0',
+      'qlinks "SETTINGS" = prevent_dup,rescan,unlock_all']
 open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.conf"), "w").write("\n".join(o) + "\n")

@@ -183,6 +183,10 @@ struct Inst {
     std::string data_dir;
     Config cfg;
     std::string sig, cache_path;
+    std::vector<std::string> def_roots;                 /* the conf / card-layout defaults (source "Default") */
+    std::string def_export;
+    std::vector<std::string> src_list, exp_list;        /* index 0 = default (""), then folders found on the cards */
+    int src_i = 0, exp_i = 0;
 
     std::mutex mu;                   /* pads[], status, export_name, sel, dup */
     Pad pads[NPADS];
@@ -203,9 +207,8 @@ struct Inst {
     std::vector<Retired> grave;
     std::thread worker, scanner;
     volatile bool stop;
-    std::atomic<bool> scan_running;
 
-    Inst() : stop(false), scan_running(false) {
+    Inst() : stop(false) {
         memset(loaded, 0, sizeof loaded);
         for (int i = 0; i < NPADS; i++) { rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
     }
@@ -278,20 +281,102 @@ struct Inst {
         for (size_t i = 0; i < r.warnings.size(); i++) fprintf(stderr, "luckydip: export: %s\n", r.warnings[i].c_str());
     }
 
+    /* ---- settings: folder choices ---- */
+    static void subdirs(const std::string &d, std::vector<std::string> &out) {
+        DIR *dp = opendir(d.c_str());
+        if (!dp) return;
+        std::vector<std::string> n;
+        while (struct dirent *e = readdir(dp)) if (e->d_name[0] != '.') n.push_back(e->d_name);
+        closedir(dp);
+        std::sort(n.begin(), n.end());
+        for (size_t i = 0; i < n.size(); i++) if (is_dir(d + "/" + n[i])) out.push_back(d + "/" + n[i]);
+    }
+    /* what a person might pick: the folders directly under each card, each pack inside an Expansions folder, and
+     * the top level of /sdcard (not the plugin and backup folders) */
+    std::vector<std::string> discover_dirs() {
+        std::vector<std::string> d;
+        std::vector<std::string> cards;
+        subdirs("/media", cards);
+        for (size_t c = 0; c < cards.size(); c++) {
+            std::string nm = base_name(cards[c]);
+            if (nm == "acvs-synths" || nm == "az01-internal") continue;     /* system mounts, not sample cards */
+            std::vector<std::string> top;
+            subdirs(cards[c], top);
+            for (size_t i = 0; i < top.size(); i++) {
+                d.push_back(top[i]);
+                if (base_name(top[i]) == "Expansions") subdirs(top[i], d);
+            }
+        }
+        std::vector<std::string> sd;
+        subdirs("/sdcard", sd);
+        for (size_t i = 0; i < sd.size(); i++) {
+            std::string nm = base_name(sd[i]);
+            if (nm != "Synths" && nm != "MPC-backup") d.push_back(sd[i]);
+        }
+        if (d.size() > 400) d.resize(400);
+        return d;
+    }
+    /* run on the scanner thread (it walks directories): installs the lists, keeping the folders already chosen */
+    void install_folder_lists(const std::vector<std::string> &d) {
+        std::lock_guard<std::mutex> l(mu);
+        std::string cs = src_list[src_i], ce = exp_list[exp_i];
+        src_list.assign(1, std::string()); exp_list.assign(1, std::string());
+        src_list.insert(src_list.end(), d.begin(), d.end());
+        exp_list.insert(exp_list.end(), d.begin(), d.end());
+        src_i = (int)index_of(src_list, cs); exp_i = (int)index_of(exp_list, ce);
+    }
+    static size_t index_of(std::vector<std::string> &v, const std::string &p) {   /* adds p when it isn't listed */
+        for (size_t i = 0; i < v.size(); i++) if (v[i] == p) return i;
+        v.push_back(p);
+        return v.size() - 1;
+    }
+    void apply_folders_locked() {
+        cfg.scan.roots = src_i > 0 ? std::vector<std::string>(1, src_list[src_i]) : def_roots;
+        cfg.export_dir = exp_i > 0 ? exp_list[exp_i] : def_export;
+    }
+    static std::string folder_label(const std::string &p, const char *dflt, size_t max) {
+        if (p.empty()) return dflt;
+        std::string s = p;
+        if (s.compare(0, 7, "/media/") == 0) s = s.substr(7);
+        else if (s.compare(0, 1, "/") == 0) s = s.substr(1);
+        if (s.size() > max) s = "~" + s.substr(s.size() - (max - 1));
+        return s;
+    }
+    void step_folder(bool source, int dir) {
+        std::lock_guard<std::mutex> l(mu);
+        std::vector<std::string> &v = source ? src_list : exp_list;
+        int &i = source ? src_i : exp_i;
+        int n = (int)v.size();
+        i = ((i + dir) % n + n) % n;
+        apply_folders_locked();
+        status = source ? "Source set: Rescan" : "Export folder set";
+    }
+
     /* ---- library ---- */
+    /* A scan request while one of ours is running is queued, not dropped: a project load sets the saved source right
+     * after create() started the first scan, and the library must end up matching it. */
+    std::mutex smu;
+    bool scan_active = false, again = false, again_force = false;
     void start_scan(bool force) {
         Shared &sh = shared();
         {
+            std::lock_guard<std::mutex> l(smu);
+            if (scan_active) { again = true; again_force = again_force || force; return; }
+        }
+        {
             std::lock_guard<std::mutex> l(sh.mu);
-            if (sh.scanning) return;
+            if (sh.scanning) return;               /* another instance is scanning; its result is shared */
             sh.scanning = true; sh.scan_files = 0;
         }
         if (scanner.joinable()) scanner.join();
-        scan_running = true;
+        { std::lock_guard<std::mutex> l(smu); scan_active = true; again = false; again_force = false; }
         set_status("Scanning...");
-        scanner = std::thread([this, force] { scan_main(force); });
+        ScanOpts opts;
+        { std::lock_guard<std::mutex> l(mu); opts = cfg.scan; }
+        std::string sg = roots_signature(opts);
+        scanner = std::thread([this, force, opts, sg] { scan_main(force, opts, sg); });
     }
-    void scan_main(bool force) {
+    void scan_pass(bool force, const ScanOpts &opts, const std::string &sig) {
         Shared &sh = shared();
         std::shared_ptr<Library> nl(new Library);
         bool cached = !force && load_cache(cache_path, sig, *nl);
@@ -299,22 +384,36 @@ struct Inst {
             nl->recs.clear();
             Classifier cl;
             ScanStats st;
-            scan_library(cfg.scan, cl, nl->recs, st, &stop);
+            scan_library(opts, cl, nl->recs, st, &stop);
             if (!stop) save_cache(cache_path, sig, *nl);
         }
         nl->rebuild();
+        std::lock_guard<std::mutex> l(sh.mu);
+        if (!stop) {
+            load_prefs(sh.prefs_path, *nl);
+            sh.lib = nl; sh.roots_sig = sig;
+        }
+    }
+    void scan_main(bool force, ScanOpts opts, std::string sig) {
+        install_folder_lists(discover_dirs());
+        for (;;) {
+            scan_pass(force, opts, sig);
+            std::lock_guard<std::mutex> l(smu);
+            if (stop || !again) break;
+            again = false; force = again_force; again_force = false;
+            { std::lock_guard<std::mutex> l2(mu); opts = cfg.scan; }
+            sig = roots_signature(opts);
+        }
+        Shared &sh = shared();
         std::string msg;
         {
             std::lock_guard<std::mutex> l(sh.mu);
-            if (!stop) {
-                load_prefs(sh.prefs_path, *nl);
-                sh.lib = nl; sh.roots_sig = sig;
-            }
             sh.scanning = false;
             msg = sh.lib->recs.empty() ? "No samples found" : "Library: " + std::to_string(sh.lib->recs.size()) + " samples";
         }
         if (!stop) set_status(msg);
-        scan_running = false;
+        std::lock_guard<std::mutex> l(smu);
+        scan_active = false;
     }
 
     /* ---- kit actions (UI thread) ---- */
@@ -404,7 +503,8 @@ struct Inst {
     /* ---- state ---- */
     std::string get_state() {
         std::lock_guard<std::mutex> l(mu);
-        std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel) + "\ndup=" + (prevent_dup ? "1" : "0") + "\n";
+        std::string s = std::string(STATE_MAGIC) + "\nsel=" + std::to_string(sel) + "\ndup=" + (prevent_dup ? "1" : "0") + "\n" +
+                        "src=" + src_list[src_i] + "\nexp=" + exp_list[exp_i] + "\n";
         for (int i = 0; i < NPADS; i++) {
             const Pad &p = pads[i];
             char head[96];
@@ -416,7 +516,19 @@ struct Inst {
         return s;
     }
     void set_state(const char *text) {
-        std::lock_guard<std::mutex> l(mu);
+        std::string want;
+        {
+            std::lock_guard<std::mutex> l(mu);
+            set_state_locked(text);
+            if (folders_changed) { folders_changed = false; apply_folders_locked(); want = roots_signature(cfg.scan); }
+        }
+        if (want.empty()) return;
+        bool differs;
+        { Shared &sh = shared(); std::lock_guard<std::mutex> l(sh.mu); differs = sh.roots_sig != want; }   /* never both locks at once */
+        if (differs) start_scan(false);              /* the saved source is not the library now loaded */
+    }
+    bool folders_changed = false;
+    void set_state_locked(const char *text) {
         std::string s = text;
         size_t pos = 0;
         bool first = true;
@@ -428,6 +540,8 @@ struct Inst {
             if (first) { first = false; if (line != STATE_MAGIC) return; continue; }
             if (line.compare(0, 4, "sel=") == 0) sel = std::max(0, std::min(NPADS - 1, atoi(line.c_str() + 4)));
             else if (line.compare(0, 4, "dup=") == 0) prevent_dup = atoi(line.c_str() + 4) != 0;
+            else if (line.compare(0, 4, "src=") == 0) { src_i = (int)index_of(src_list, line.substr(4)); folders_changed = true; }
+            else if (line.compare(0, 4, "exp=") == 0) { exp_i = (int)index_of(exp_list, line.substr(4)); folders_changed = true; }
             else if (line.compare(0, 4, "pad\t") == 0) {
                 /* pad \t idx \t locked \t pool \t cat \t gain \t path */
                 std::vector<std::string> f;
@@ -475,19 +589,19 @@ void *e_create(const char *data_dir) {
     in->data_dir = data_dir && *data_dir ? data_dir : "/tmp/luckydip";
     make_dirs(in->data_dir);
     in->cfg = load_config(in->data_dir);
+    in->def_roots = in->cfg.scan.roots;
+    in->def_export = in->cfg.export_dir;
+    in->src_list.assign(1, std::string()); in->exp_list.assign(1, std::string());   /* the scanner thread fills the choices in */
     in->sig = roots_signature(in->cfg.scan);
     in->cache_path = in->data_dir + "/index.cache";
     in->status = "Starting...";
     Shared &sh = shared();
-    bool need_scan = false;
     {
         std::lock_guard<std::mutex> l(sh.mu);
         if (sh.prefs_path.empty()) sh.prefs_path = in->data_dir + "/prefs.txt";
-        need_scan = sh.lib->recs.empty() || sh.roots_sig != in->sig;
     }
     in->worker = std::thread([in] { in->worker_main(); });
-    if (need_scan) in->start_scan(false);
-    else in->set_status("Library: " + std::to_string(sh.lib->recs.size()) + " samples");
+    in->start_scan(false);       /* loads the cached index (or scans) and finds the folders the settings page offers */
     return in;
 }
 
@@ -522,6 +636,10 @@ void e_set_param(void *h, const char *key, const char *val) {
     if (!strcmp(key, "normalise")) { if (is_on(val)) in->normalise(); return; }
     if (!strcmp(key, "export")) { if (is_on(val)) in->do_export_req(); return; }
     if (!strcmp(key, "rescan")) { if (is_on(val)) in->start_scan(true); return; }
+    if (!strcmp(key, "src_prev")) { if (is_on(val)) in->step_folder(true, -1); return; }
+    if (!strcmp(key, "src_next")) { if (is_on(val)) in->step_folder(true, 1); return; }
+    if (!strcmp(key, "exp_prev")) { if (is_on(val)) in->step_folder(false, -1); return; }
+    if (!strcmp(key, "exp_next")) { if (is_on(val)) in->step_folder(false, 1); return; }
     if (!strcmp(key, "prevent_dup")) { std::lock_guard<std::mutex> l(in->mu); in->prevent_dup = is_on(val); return; }
     if (!strcmp(key, "sel_pad")) {
         std::lock_guard<std::mutex> l(in->mu);
@@ -553,7 +671,16 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
     size_t kl = strlen(key);
     if (kl > 3 && !strcmp(key + kl - 3, "_on")) return 0;   /* the wrapper polls these from the audio thread: no lock */
     if (!strcmp(key, "state")) return put(buf, n, in->get_state());
+    if (!strcmp(key, "lib_info")) {
+        Shared &sh = shared();
+        std::lock_guard<std::mutex> l(sh.mu);
+        if (sh.scanning) return put(buf, n, "Scanning...");
+        return put(buf, n, sh.lib->recs.empty() ? "No samples" : std::to_string(sh.lib->recs.size()) + " samples");
+    }
     std::lock_guard<std::mutex> l(in->mu);
+    if (!strcmp(key, "src_name")) return put(buf, n, Inst::folder_label(in->src_list[in->src_i], "Default (auto)", 23));
+    if (!strcmp(key, "exp_name")) return put(buf, n, Inst::folder_label(in->exp_list[in->exp_i], "Default (auto)", 23));
+    if (!strcmp(key, "src_prev") || !strcmp(key, "src_next") || !strcmp(key, "exp_prev") || !strcmp(key, "exp_next")) return put(buf, n, "0");
     if (!strcmp(key, "status")) return put(buf, n, in->status);
     if (!strcmp(key, "export_name")) return put(buf, n, in->export_name.empty() ? "-" : in->export_name);
     if (!strcmp(key, "prevent_dup")) return put(buf, n, in->prevent_dup ? "1" : "0");

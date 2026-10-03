@@ -111,4 +111,7 @@ def panel(name, lt, dk, wd, ht):
 panel("panel_cat.svg", *CANDY[0], 860, 380)
 panel("panel_kit.svg", *CANDY[4], 340, 380)
 panel("panel_pad.svg", *CANDY[2], 1240, 246)
+panel("panel_src.svg", *CANDY[5], 1240, 150)
+panel("panel_exp.svg", *CANDY[1], 1240, 150)
+panel("panel_lib.svg", *CANDY[3], 1240, 150)
 print("art ->", OUT)
