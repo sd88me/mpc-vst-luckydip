@@ -73,6 +73,11 @@ record indices with per-call flags (`Picks`, a path -> index map in `Library`): 
 14% in the random-parameter sweep). `tests/time_actions.cpp` times each engine action on a device (armhf build). Lesson: run the
 bench before committing a deploy.
 
+## Fresh-track lit state (2026-10-04)
+The `<key>_on` mirrors (locks, each pad's effective pool) were only filled by a state restore or a lock/category change, so on a
+brand-new track no category key was lit. `create()` now fills them; `tests/engine_test.cpp` checks a fresh instance (every earlier
+test went through a state restore and missed it). Caught by the first run on a new track.
+
 ## Open issues
 - ~~Async text does not refresh~~ (fixed by the wrapper poll, see above).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.

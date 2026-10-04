@@ -668,6 +668,7 @@ void *e_create(const char *data_dir) {
     in->def_export = in->cfg.export_dir;
     for (int i = 0; i < NSIZES; i++) if (SIZE_MB[i] * 1024LL * 1024 <= in->cfg.scan.max_bytes) in->size_idx = i;   /* conf's max_mb, rounded down to a choice */
     in->apply_folders_locked();
+    in->sync_mirrors_locked();      /* the "<key>_on" mirrors must be right before any state is restored: a new track has none */
     in->sig = roots_signature(in->cfg.scan);
     in->cache_path = in->data_dir + "/index.cache";
     in->status = "Starting...";

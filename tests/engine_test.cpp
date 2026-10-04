@@ -51,6 +51,9 @@ int main() {
     CHECK(h, "create");
     CHECK(wait_for(h, "status", "Library: 15"), "scan finished: \"%s\"", get(h, "status").c_str());
     CHECK(get(h, "pad1_name") == "(empty)", "pads start empty");
+    /* a brand-new track (no saved state): the selected pad's default categories are lit from the start, locks are not */
+    CHECK(get(h, "sel_pad") == "1" && get(h, "sel_cat_kick_on") == "1" && get(h, "sel_cat_snare_on") == "0" && get(h, "sel_lock_on") == "0",
+          "fresh instance: pad 1 shows its default pool (kick) lit (kick=%s snare=%s)", get(h, "sel_cat_kick_on").c_str(), get(h, "sel_cat_snare_on").c_str());
     CHECK(peak(h, 4) == 0, "silent with no kit");
 
     trig(h, "generate");
