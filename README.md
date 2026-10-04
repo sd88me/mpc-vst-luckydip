@@ -8,7 +8,8 @@ export it as a normal MPC drum program.
 
 It's a way to **find the samples you forgot you had**: the pack you downloaded and never opened, the odd hit buried three
 folders deep, the old recording you made years ago. Every dip is a surprise, and some of them are good.
-
+<img width="320" height="200" alt="image" src="https://github.com/user-attachments/assets/773cbf1b-a9f9-4d57-8bbe-dfca866def60" />
+<img width="320" height="200" alt="image" src="https://github.com/user-attachments/assets/b4d44e0b-d017-4bec-8e28-928150d2f30d" />
 Lucky Dip is a native plugin (VST2) for MPC OS standalone devices. It was built and tested on an **Akai Force** (MPC OS
 3.9.1.x); it should load on any MPC OS standalone unit with the same plugin host, but those haven't been tested yet.
 
@@ -23,9 +24,6 @@ Lucky Dip is a native plugin (VST2) for MPC OS standalone devices. It was built 
   favourites (more likely to come up) and rejects (never again).
 - **Matches levels** so a loud sample doesn't swamp a quiet one.
 - **Exports an MPC drum program** (`.xpm`) that you can load like any other kit.
-<img width="320" height="200" alt="image" src="https://github.com/user-attachments/assets/773cbf1b-a9f9-4d57-8bbe-dfca866def60" />
-<img width="320" height="200" alt="image" src="https://github.com/user-attachments/assets/b4d44e0b-d017-4bec-8e28-928150d2f30d" />
-
 
 ## Requirements
 - An MPC OS standalone device (Akai Force tested), and samples on its internal drive or a card.
