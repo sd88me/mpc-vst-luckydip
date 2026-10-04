@@ -12,6 +12,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace ld {
@@ -353,43 +354,61 @@ struct Library {
     std::vector<Rec> recs;
     std::set<std::string> rejects, favourites;     /* library-wide preferences (paths) */
     std::vector<std::vector<int> > by_cat;          /* record indices per category */
+    std::unordered_map<std::string, int> by_path;   /* path -> record index */
     void rebuild() {
         by_cat.assign(NCAT, std::vector<int>());
-        for (size_t i = 0; i < recs.size(); i++)
+        by_path.clear();
+        for (size_t i = 0; i < recs.size(); i++) {
             if (recs[i].cat >= 0 && recs[i].cat < NCAT) by_cat[recs[i].cat].push_back((int)i);
+            by_path[recs[i].path] = (int)i;
+        }
+    }
+    int find(const std::string &path) const {
+        std::unordered_map<std::string, int>::const_iterator it = by_path.find(path);
+        return it == by_path.end() ? -1 : it->second;
     }
 };
 
-/* resolveOne: pick one record for a pad from its category union.
- * `used` = paths already taken. Avoids the pad's own current sample; relaxes duplicates when the unique pool
- * runs dry (never relaxes rejects); favourites get a second entry (~2x as likely). Returns -1 when empty. */
-inline int resolve_one(const Pad &pad, const std::vector<int> &cats, const Library &lib, Rng &rng,
-                       const std::set<std::string> &used, bool prevent_dup, bool *relaxed) {
+/* Per-call flags by record index, so picking a sample is integer work (the earlier version looked every candidate up in
+ * string sets: ~6 ms for a kit on a Force, on the UI thread). */
+struct Picks {
+    std::vector<uint8_t> rej, fav, used;
+    explicit Picks(const Library &lib) : rej(lib.recs.size(), 0), fav(lib.recs.size(), 0), used(lib.recs.size(), 0) {
+        for (std::set<std::string>::const_iterator i = lib.rejects.begin(); i != lib.rejects.end(); ++i) { int k = lib.find(*i); if (k >= 0) rej[k] = 1; }
+        for (std::set<std::string>::const_iterator i = lib.favourites.begin(); i != lib.favourites.end(); ++i) { int k = lib.find(*i); if (k >= 0) fav[k] = 1; }
+    }
+};
+
+/* resolveOne: pick one record for a pad from its category union (a record index, or -1 when empty).
+ * Avoids the pad's own current sample; relaxes duplicates when the unique pool runs dry (never relaxes rejects);
+ * favourites get a second entry (~2x as likely). */
+inline int resolve_one(const Pad &pad, const std::vector<int> &cats, const Library &lib, Rng &rng, const Picks &pk,
+                       bool prevent_dup, bool *relaxed) {
     if (relaxed) *relaxed = false;
+    int cur = pad.has ? lib.find(pad.sample.path) : -1;
     std::vector<int> pool;
     for (size_t c = 0; c < cats.size(); c++) {
         const std::vector<int> &v = lib.by_cat[cats[c]];
         for (size_t i = 0; i < v.size(); i++) {
-            const Rec &r = lib.recs[v[i]];
-            if (lib.rejects.count(r.path)) continue;
-            if (prevent_dup && used.count(r.path)) continue;
-            pool.push_back(v[i]);
+            int k = v[i];
+            if (pk.rej[k] || (prevent_dup && pk.used[k])) continue;
+            pool.push_back(k);
         }
     }
-    if (pad.has && !pool.empty()) {
+    if (cur >= 0 && !pool.empty()) {
         std::vector<int> alt;
-        for (size_t i = 0; i < pool.size(); i++) if (lib.recs[pool[i]].path != pad.sample.path) alt.push_back(pool[i]);
+        for (size_t i = 0; i < pool.size(); i++) if (pool[i] != cur) alt.push_back(pool[i]);
         if (!alt.empty()) pool.swap(alt);
     }
     if (pool.empty() && prevent_dup) {
         std::vector<int> all;
         for (size_t c = 0; c < cats.size(); c++) {
             const std::vector<int> &v = lib.by_cat[cats[c]];
-            for (size_t i = 0; i < v.size(); i++) if (!lib.rejects.count(lib.recs[v[i]].path)) all.push_back(v[i]);
+            for (size_t i = 0; i < v.size(); i++) if (!pk.rej[v[i]]) all.push_back(v[i]);
         }
-        if (!all.empty() && pad.has) {
+        if (!all.empty() && cur >= 0) {
             std::vector<int> alt;
-            for (size_t i = 0; i < all.size(); i++) if (lib.recs[all[i]].path != pad.sample.path) alt.push_back(all[i]);
+            for (size_t i = 0; i < all.size(); i++) if (all[i] != cur) alt.push_back(all[i]);
             if (!alt.empty()) all.swap(alt);
         }
         if (!all.empty()) { pool.swap(all); if (relaxed) *relaxed = true; }
@@ -397,7 +416,7 @@ inline int resolve_one(const Pad &pad, const std::vector<int> &cats, const Libra
     if (pool.empty()) return -1;
     std::vector<int> weighted = pool;
     if (!lib.favourites.empty())
-        for (size_t i = 0; i < pool.size(); i++) if (lib.favourites.count(lib.recs[pool[i]].path)) weighted.push_back(pool[i]);
+        for (size_t i = 0; i < pool.size(); i++) if (pk.fav[pool[i]]) weighted.push_back(pool[i]);
     return weighted[(size_t)(rng.next() * weighted.size())];
 }
 
@@ -407,17 +426,17 @@ struct AssignResult { int unresolved = 0, relaxed = 0; std::vector<int> changed;
 inline AssignResult assign_kit(Pad pads[NPADS], const Library &lib, uint32_t seed, bool prevent_dup = true) {
     AssignResult res;
     Rng rng(seed);
-    std::set<std::string> used;
-    for (int i = 0; i < NPADS; i++) if (pads[i].locked && pads[i].has) used.insert(pads[i].sample.path);
+    Picks pk(lib);
+    for (int i = 0; i < NPADS; i++) if (pads[i].locked && pads[i].has) { int k = lib.find(pads[i].sample.path); if (k >= 0) pk.used[k] = 1; }
     for (int i = 0; i < NPADS; i++) {
         Pad &p = pads[i];
         if (p.locked) continue;
         bool rel = false;
-        int r = resolve_one(p, pool_cats(i, p.pool), lib, rng, used, prevent_dup, &rel);
+        int r = resolve_one(p, pool_cats(i, p.pool), lib, rng, pk, prevent_dup, &rel);
         if (r < 0) { res.unresolved++; continue; }
         std::string prev = p.has ? p.sample.path : std::string();
         p.has = true; p.sample.path = lib.recs[r].path; p.sample.cat = lib.recs[r].cat;
-        used.insert(p.sample.path);
+        pk.used[r] = 1;
         if (rel) res.relaxed++;
         if (p.sample.path != prev) res.changed.push_back(i);
     }
@@ -428,10 +447,10 @@ inline AssignResult assign_kit(Pad pads[NPADS], const Library &lib, uint32_t see
 inline bool reroll_pad(Pad pads[NPADS], int i, const Library &lib, uint32_t seed, bool prevent_dup = true) {
     if (i < 0 || i >= NPADS || pads[i].locked) return false;
     Rng rng(seed);
-    std::set<std::string> used;
-    for (int j = 0; j < NPADS; j++) if (j != i && pads[j].has) used.insert(pads[j].sample.path);
+    Picks pk(lib);
+    for (int j = 0; j < NPADS; j++) if (j != i && pads[j].has) { int k = lib.find(pads[j].sample.path); if (k >= 0) pk.used[k] = 1; }
     bool rel;
-    int r = resolve_one(pads[i], pool_cats(i, pads[i].pool), lib, rng, used, prevent_dup, &rel);
+    int r = resolve_one(pads[i], pool_cats(i, pads[i].pool), lib, rng, pk, prevent_dup, &rel);
     if (r < 0) return false;
     bool changed = !pads[i].has || pads[i].sample.path != lib.recs[r].path;
     pads[i].has = true; pads[i].sample.path = lib.recs[r].path; pads[i].sample.cat = lib.recs[r].cat;

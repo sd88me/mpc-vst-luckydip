@@ -66,6 +66,13 @@ getting back to the default (or empty) means "default" again. **MPC keeps a plug
 after a deploy, remove it from every track (or reopen the project) before judging the new build; a stale instance showed
 old text ("L:KICK") with the new skin.
 
+## Generate speed (2026-10-04)
+Picking samples looked every candidate up in string sets (rejects, used paths): 5.8 ms for a kit with 5,200 samples on a Force, on the
+UI thread, and the bench's sweep (which fires Generate at random) failed with worst blocks of 600-1000%. Selection now works on
+record indices with per-call flags (`Picks`, a path -> index map in `Library`): 0.4 ms, bench PASS again (worst block 26%, p99
+14% in the random-parameter sweep). `tests/time_actions.cpp` times each engine action on a device (armhf build). Lesson: run the
+bench before committing a deploy.
+
 ## Open issues
 - ~~Async text does not refresh~~ (fixed by the wrapper poll, see above).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.
