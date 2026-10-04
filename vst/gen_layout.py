@@ -51,7 +51,7 @@ def pads_page(first):
         t += ['frame   x=%d y=%d w=295 h=270 title="PAD %d" img=images/tile_%d.svg' % (x, y, n, (n - 1) % 8),
               'readout cx=%d cy=%d w=265 h=34 label="" key=pad%d_name get=pad%d_name' % (x + 147, y + 60, n, n),
               'readout cx=%d cy=%d w=130 h=28 label="" key=pad%d_pill get=pad%d_pill' % (x + 85, y + 102, n, n),
-              'toggle  cx=%d cy=%d label="LOCK" key=pad%d_lock' % (x + 228, y + 98, n),
+              'toggle  cx=%d cy=%d label="" key=pad%d_lock img=images/lock_off.svg img_on=images/lock_on.svg w=106 h=44' % (x + 228, y + 100, n),
               'knob    cx=%d cy=%d r=34 label="GAIN" key=pad%d_gain' % (x + 75, y + 168, n),
               'button  cx=%d cy=%d label="PLAY" key=pad%d_play color=3dd64f' % (x + 218, y + 168, n),
               'button  cx=%d cy=%d label="REROLL" key=pad%d_reroll color=ff9f1c' % (x + 218, y + 226, n)]
@@ -61,26 +61,27 @@ def pads_page(first):
 
 o += pads_page(1) + [""] + pads_page(9)
 o += ["", "[tab PAD EDIT]", BG]
-o += ['frame   x=20 y=82 w=860 h=330 title="CATEGORY - TAP TO TOGGLE" img=images/panel_cat.svg',
-      'frame   x=900 y=82 w=340 h=330 title="KIT" img=images/panel_kit.svg']
+o += ['frame   x=20 y=82 w=1240 h=292 title="PAD EDIT" img=images/panel_pad.svg',
+      'stepper cx=150 cy=156 w=220 h=44 label="" key=sel_pad prev=sel_prev next=sel_next get=sel_name',
+      'readout cx=660 cy=156 w=700 h=44 label="" key=sel_name get=sel_name',
+      'button  cx=1140 cy=156 label="   PLAY   " key=sel_play color=3dd64f',
+      'knob    cx=150 cy=244 r=35 label="GAIN" key=sel_gain',
+      'toggle  cx=370 cy=244 label="" key=sel_lock img=images/lock_off.svg img_on=images/lock_on.svg w=106 h=44',
+      'button  cx=520 cy=244 label="CLEAR" key=sel_clear color=8a3df0',
+      'button  cx=670 cy=244 label="REROLL" key=sel_reroll color=ff9f1c',
+      'button  cx=820 cy=244 label="FAV" key=sel_fav color=ff2e7e',
+      'button  cx=960 cy=244 label="REJECT" key=sel_reject color=e8323c',
+      'toggle  cx=1130 cy=244 label="" key=follow img=images/follow_off.svg img_on=images/follow_on.svg w=120 h=44',
+      'frame   x=20 y=382 w=860 h=330 title="CATEGORY - TAP TO TOGGLE" img=images/panel_cat.svg',
+      'frame   x=900 y=382 w=340 h=330 title="KIT" img=images/panel_kit.svg']
 for k, (key, lab) in enumerate(CATS):
-    o.append('toggle  cx=%d cy=%d label="%s" key=sel_cat_%s' % (105 + (k % 6) * 138, 150 + (k // 6) * 72, lab, key))
-o += ['button  cx=1070 cy=150 label="GENERATE ALL" key=generate color=ff2e7e',
-      'button  cx=1070 cy=206 label="CLEAR ALL" key=clear_all color=8a3df0',
-      'button  cx=1070 cy=262 label="NORMALISE" key=normalise color=2677f0',
-      'button  cx=1070 cy=318 label="RESCAN LIBRARY" key=rescan color=10a8a0',
-      'button  cx=1070 cy=374 label="EXPORT KIT" key=export color=ff7a00',
-      'frame   x=20 y=420 w=1240 h=292 title="PAD EDIT" img=images/panel_pad.svg',
-      'stepper cx=150 cy=494 w=220 h=44 label="" key=sel_pad prev=sel_prev next=sel_next get=sel_name',
-      'readout cx=660 cy=494 w=700 h=44 label="" key=sel_name get=sel_name',
-      'button  cx=1140 cy=494 label="   PLAY   " key=sel_play color=3dd64f',
-      'knob    cx=150 cy=582 r=35 label="GAIN" key=sel_gain',
-      'toggle  cx=370 cy=580 label="LOCK" key=sel_lock',
-      'button  cx=520 cy=582 label="CLEAR" key=sel_clear color=8a3df0',
-      'button  cx=670 cy=582 label="REROLL" key=sel_reroll color=ff9f1c',
-      'button  cx=820 cy=582 label="FAV" key=sel_fav color=ff2e7e',
-      'button  cx=960 cy=582 label="REJECT" key=sel_reject color=e8323c',
-      'toggle  cx=1130 cy=580 label="FOLLOW" key=follow',
+    o.append('toggle  cx=%d cy=%d label="" key=sel_cat_%s img=images/cat_%s_off.svg img_on=images/cat_%s_on.svg w=124 h=40' % (
+        105 + (k % 6) * 138, 456 + (k // 6) * 64, key, key, key))
+o += ['button  cx=1070 cy=450 label="GENERATE ALL" key=generate color=ff2e7e',
+      'button  cx=1070 cy=506 label="CLEAR ALL" key=clear_all color=8a3df0',
+      'button  cx=1070 cy=562 label="NORMALISE" key=normalise color=2677f0',
+      'button  cx=1070 cy=618 label="RESCAN LIBRARY" key=rescan color=10a8a0',
+      'button  cx=1070 cy=674 label="EXPORT KIT" key=export color=ff7a00',
       'qlinks "PAD EDIT" = sel_gain,sel_pad,sel_lock,sel_reroll,sel_clear,sel_play,sel_fav,sel_reject,follow,generate,clear_all,normalise,export,rescan']
 
 def folder_rows(y, pre):
@@ -94,20 +95,20 @@ def folder_rows(y, pre):
 o += ["", "[tab SETTINGS]", BG, "art file=images/banner.svg x=0 y=86 w=1280 h=70",
       'readout cx=905 cy=121 w=640 h=40 label="" key=status get=status',
       'frame   x=20 y=164 w=1240 h=170 title="SAMPLE SOURCE" img=images/panel_src.svg'] + folder_rows(164, "src") + [
-      'text    cx=1120 cy=222 label="Default (auto) = the Expansions and"',
+      'text    cx=1120 cy=222 label="\'DEFAULT (AUTO)\' = the Expansions and"',
       'text    cx=1120 cy=246 label="Samples folders on every card."',
-      'text    cx=640 cy=312 label="Pick a folder, then (optionally) one folder inside it, such as a single pack. Press RESCAN to apply."',
+      'text    cx=640 cy=312 label="Pick a \'FOLDER\', then (optionally) one folder \'INSIDE\' it, such as a single pack. Press \'RESCAN\' to apply."',
       'frame   x=20 y=340 w=1240 h=170 title="EXPORT FOLDER" img=images/panel_exp.svg'] + folder_rows(340, "exp") + [
       'enum_h  cx=1090 cy=398 sw=150 label="SAMPLES" key=export_mode',
-      'text    cx=640 cy=488 label="Copy puts the samples in the kit folder. Link points at the originals instead (no duplicates; keep them in place)."',
+      'text    cx=640 cy=488 label="\'COPY SAMPLES\' puts the samples in the kit folder. \'LINK TO ORIGINALS\' points at them instead (no duplicates; keep them in place)."',
       'frame   x=20 y=516 w=1240 h=190 title="LIBRARY" img=images/panel_lib.svg',
       'readout cx=190 cy=580 w=250 h=44 label="" key=lib_info get=lib_info',
       'button  cx=400 cy=580 label="RESCAN" key=rescan color=10a8a0',
-      'toggle  cx=560 cy=576 label="NO DUPLICATES" key=prevent_dup',
+      'toggle  cx=560 cy=580 label="" key=prevent_dup img=images/nodup_off.svg img_on=images/nodup_on.svg w=176 h=44',
       'button  cx=760 cy=580 label="UNLOCK ALL" key=unlock_all color=8a3df0',
-      'text    cx=1050 cy=566 label="No Duplicates: a sample is used on only"',
+      'text    cx=1050 cy=566 label="\'NO DUPLICATES\': a sample is used on only"',
       'text    cx=1050 cy=590 label="one pad (unless a pool runs dry)."',
-      'toggle  cx=130 cy=650 label="SKIP LOOPS" key=skip_loops',
+      'toggle  cx=130 cy=654 label="" key=skip_loops img=images/loops_off.svg img_on=images/loops_on.svg w=146 h=44',
       'enum_h  cx=720 cy=660 sw=100 label="MAX FILE SIZE" key=max_size',
       'qlinks "SETTINGS" = rescan,prevent_dup,skip_loops,max_size,export_mode,unlock_all']
 open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.conf"), "w").write("\n".join(o) + "\n")

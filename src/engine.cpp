@@ -234,6 +234,8 @@ struct Inst {
     float rms[NPADS];
     std::atomic<int> sel{0};            /* the selected pad (PAD EDIT page); follow moves it from the audio thread */
     pthread_t audio_tid; std::atomic<bool> audio_known{false};   /* the thread that calls render(): it must never block */
+    std::atomic<uint32_t> lock_bits{0};              /* lock-free mirrors of pads[].locked / .pool for the "<key>_on" reads, which the */
+    std::atomic<uint32_t> pool_bits[NPADS];          /* wrapper polls from the audio thread (and which must follow the selection) */
     std::atomic<bool> follow{true};     /* the selection follows the last pad played */
     bool prevent_dup = true;
     std::string status, export_name;
@@ -252,7 +254,7 @@ struct Inst {
 
     Inst() : stop(false) {
         memset(loaded, 0, sizeof loaded);
-        for (int i = 0; i < NPADS; i++) { rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
+        for (int i = 0; i < NPADS; i++) { pool_bits[i] = 0; rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
     }
 
     void set_status(const std::string &s) { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); }
@@ -284,6 +286,11 @@ struct Inst {
             Job j; j.type = Job::LOAD; j.pad = i; j.path = pads[i].sample.path;
             push(j);
         }
+    }
+    void sync_mirrors_locked() {
+        uint32_t lk = 0;
+        for (int i = 0; i < NPADS; i++) { if (pads[i].locked) lk |= 1u << i; pool_bits[i] = pads[i].pool; }
+        lock_bits = lk;
     }
     void drop_pad_locked(int i) {
         loaded[i] = 0; rms[i] = 0;
@@ -397,7 +404,7 @@ struct Inst {
         FolderSel &f = which < 2 ? src : exp;
         if (which % 2 == 0) f.step_loc(d); else f.step_sub(d);
         apply_folders_locked();
-        status = which < 2 ? "Source set: Rescan" : "Export folder set";
+        status = which < 2 ? "Source set: 'RESCAN'" : "Export folder set";
     }
 
     /* ---- library ---- */
@@ -510,6 +517,7 @@ struct Inst {
     void unlock_all() {
         std::lock_guard<std::mutex> l(mu);
         for (int i = 0; i < NPADS; i++) pads[i].locked = false;
+        sync_mirrors_locked();
         status = "Unlocked all";
     }
     void normalise() {
@@ -624,6 +632,7 @@ struct Inst {
                 drop_pad_locked(i);
             }
         }
+        sync_mirrors_locked();
         queue_loads_locked();
     }
 };
@@ -709,8 +718,8 @@ void e_set_param(void *h, const char *key, const char *val) {
         }
     }
     if (!strcmp(key, "export_mode")) { std::lock_guard<std::mutex> l(in->mu); in->link_samples = atoi(val) == 1; return; }
-    if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "Rescan to apply"; return; }
-    if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "Rescan to apply"; return; }
+    if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "'RESCAN' to apply"; return; }
+    if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "'RESCAN' to apply"; return; }
     if (!strcmp(key, "prevent_dup")) { std::lock_guard<std::mutex> l(in->mu); in->prevent_dup = is_on(val); return; }
     if (!strcmp(key, "follow")) { in->follow = is_on(val); return; }
     if (!strcmp(key, "sel_pad")) {
@@ -721,11 +730,12 @@ void e_set_param(void *h, const char *key, const char *val) {
     int pad; const char *f;
     if (!split_key(in, key, &pad, &f)) return;
     if (!strcmp(f, "gain")) { std::lock_guard<std::mutex> l(in->mu); in->pads[pad].gain = (float)std::max(0.0, std::min(200.0, atof(val))) / 100.0f; }
-    else if (!strcmp(f, "lock")) { std::lock_guard<std::mutex> l(in->mu); in->pads[pad].locked = is_on(val); }
+    else if (!strcmp(f, "lock")) { std::lock_guard<std::mutex> l(in->mu); in->pads[pad].locked = is_on(val); in->sync_mirrors_locked(); }
     else if (!strncmp(f, "cat_", 4)) {      /* sel_cat_<name>: one category in/out of the pad's pool */
         for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) {
             std::lock_guard<std::mutex> l(in->mu);
             if (is_on(val)) in->pads[pad].pool |= 1u << k; else in->pads[pad].pool &= ~(1u << k);
+            in->sync_mirrors_locked();
         }
     }
     else if (!strcmp(f, "reroll")) { if (is_on(val)) in->reroll(pad); }
@@ -741,7 +751,15 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
     Inst *in = (Inst *)h;
     if (n <= 0) return 0;
     size_t kl = strlen(key);
-    if (kl > 3 && !strcmp(key + kl - 3, "_on")) return 0;   /* the wrapper polls these from the audio thread: no lock */
+    if (kl > 3 && !strcmp(key + kl - 3, "_on")) {     /* the wrapper polls these from the audio thread: lock-free, from the mirrors */
+        std::string base(key, kl - 3);
+        int pad; const char *f;
+        if (!split_key(in, base.c_str(), &pad, &f)) return 0;
+        if (!strcmp(f, "lock")) return put(buf, n, (in->lock_bits.load() >> pad) & 1 ? "1" : "0");
+        if (!strncmp(f, "cat_", 4))
+            for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) return put(buf, n, (in->pool_bits[pad].load() >> k) & 1 ? "1" : "0");
+        return 0;
+    }
     if (!strcmp(key, "state")) return put(buf, n, in->get_state());
     /* The wrapper polls every text param from the audio thread (to notice text that changed by itself): there a lock that is
      * busy (Generate holds them for a few ms) means "no text this time", never a wait. Other threads wait as usual. */
@@ -777,8 +795,8 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
         if (in->loaded[pad] == 2) s = "! " + short_name(p.sample.path, 21);
         return put(buf, n, s);
     }
-    if (!strncmp(f, "cat_", 4)) {
-        for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) return put(buf, n, (p.pool >> k) & 1 ? "1" : "0");
+    if (!strncmp(f, "cat_", 4)) {            /* a text param (its look is baked into the skin): the label; the state is "<key>_on" */
+        for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) return put(buf, n, CAT_SHORT[k]);
         return 0;
     }
     if (!strcmp(f, "cat")) return put(buf, n, p.has ? CAT_NAME[p.sample.cat] : "-");
@@ -789,10 +807,10 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
             for (int k = NCAT - 1; k >= 0; k--) if ((p.pool >> k) & 1) { first = k; cnt++; }
             s = std::string(CAT_SHORT[first]) + (cnt > 1 ? "+" : "");
         }
-        return put(buf, n, std::string(p.locked ? "L:" : "") + s);
+        return put(buf, n, s);
     }
     if (!strcmp(f, "gain")) return put(buf, n, std::to_string((int)(p.gain * 100.0f + 0.5f)));
-    if (!strcmp(f, "lock")) return put(buf, n, p.locked ? "1" : "0");
+    if (!strcmp(f, "lock")) return put(buf, n, "LOCK");
         if (!strcmp(f, "reroll") || !strcmp(f, "play") || !strcmp(f, "clear") || !strcmp(f, "fav") || !strcmp(f, "reject")) return put(buf, n, "0");
     return 0;
 }

@@ -50,6 +50,14 @@ themselves (confirmed on a Force: status and selected pad update on their own). 
 `get_param` never waits on the audio thread: it `try_lock`s there (the thread that calls `render`) and answers "no text" when a lock is
 busy. An earlier `_refresh` counter in the engine plus a wrapper PR (#157) did the same job and was dropped in favour of this.
 
+## Lit toggles (2026-10-04)
+LOCK, FOLLOW, NO DUPLICATES, SKIP LOOPS and the 23 category buttons are drawn as glassy keys that light up (own SVG art from
+`vst/gen_art.py`; the stock Akai skin assets in `mpc-vst/Assets/` are not used or committed). The category buttons are lit in
+their pad-colour family. The host does not re-read a plain toggle when the engine changes it, so the pad LOCKs, the PAD EDIT
+LOCK and the category buttons are `"display":"string"` params (min 0, max 1) whose state is the engine's lock-free
+`<key>_on` (mirrors of `pads[].locked/.pool`, updated under the lock): the wrapper polls `_on` and pushes the change, so the
+category matrix follows the selected pad and Unlock All clears the lit locks. Bench with 40 more polled params: worst block 5.2%.
+
 ## Open issues
 - ~~Async text does not refresh~~ (fixed by the wrapper poll, see above).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.

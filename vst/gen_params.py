@@ -7,6 +7,10 @@ CATS = ["kick", "snare", "rim", "clap", "hat", "closed_hat", "open_hat", "tom", 
 P = []
 def trig(key, name, **kw): P.append(dict(key=key, name=name, min=0, max=1, momentary=True, **kw))
 def text(key, name): P.append(dict(key=key, name=name, min=0, max=0, display="string"))
+def stoggle(key, name):
+    """An on/off whose look is baked into the skin and whose state is the engine's "<key>_on" (a "string" param): the host
+    does not re-read a plain toggle when the engine changes it (Unlock All, the selection moving), but it does re-read these."""
+    P.append(dict(key=key, name=name, min=0, max=1, display="string"))
 def toggle(key, name, default=0): P.append(dict(key=key, name=name, options=["OFF", "ON"], default=default))
 
 text("status", "Status")
@@ -19,8 +23,8 @@ toggle("prevent_dup", "No Duplicates", 1)
 trig("sel_prev", "Prev Pad", step_of="sel_pad", step_delta=-1)
 trig("sel_next", "Next Pad", step_of="sel_pad", step_delta=1)
 text("sel_name", "Sample"); text("sel_cat", "Category")
-for c in CATS: toggle("sel_cat_" + c, c.replace("_", " ").title())   # the pad's pool: a set of categories (none = default)
-toggle("sel_lock", "Lock")
+for c in CATS: stoggle("sel_cat_" + c, c.replace("_", " ").title())   # the pad's pool: a set of categories (none = default)
+stoggle("sel_lock", "Lock")
 trig("sel_reroll", "Reroll"); trig("sel_clear", "Clear"); trig("sel_play", "Play")
 trig("sel_fav", "Favourite"); trig("sel_reject", "Reject")
 text("export_name", "Last Export")
@@ -29,7 +33,7 @@ for i in range(1, 17):
     text("pad%d_name" % i, "Pad %d" % i)
     text("pad%d_pill" % i, "Pad %d Pool" % i)
     P.append(dict(key="pad%d_gain" % i, name="Pad %d Gain" % i, min=0, max=200, default=100, unit="%", display="int"))
-    toggle("pad%d_lock" % i, "Pad %d Lock" % i)
+    stoggle("pad%d_lock" % i, "Pad %d Lock" % i)
     trig("pad%d_reroll" % i, "Pad %d Reroll" % i)
     trig("pad%d_play" % i, "Pad %d Play" % i)
 # settings (SETTINGS page). Not shipped yet, so this tail was reworked in place; once released: append only.

@@ -111,218 +111,170 @@
   {
    "key": "sel_cat_kick",
    "name": "Kick",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_snare",
    "name": "Snare",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_rim",
    "name": "Rim",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_clap",
    "name": "Clap",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_hat",
    "name": "Hat",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_closed_hat",
    "name": "Closed Hat",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_open_hat",
    "name": "Open Hat",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_tom",
    "name": "Tom",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_conga",
    "name": "Conga",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_percussion",
    "name": "Percussion",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_crash",
    "name": "Crash",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_ride",
    "name": "Ride",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_cymbal",
    "name": "Cymbal",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_fx",
    "name": "Fx",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_glitch",
    "name": "Glitch",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_vox",
    "name": "Vox",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_bass",
    "name": "Bass",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_synth",
    "name": "Synth",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_stab",
    "name": "Stab",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_chord",
    "name": "Chord",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_lead",
    "name": "Lead",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_pad",
    "name": "Pad",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_cat_other",
    "name": "Other",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_lock",
    "name": "Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "sel_reroll",
@@ -392,11 +344,9 @@
   {
    "key": "pad1_lock",
    "name": "Pad 1 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad1_reroll",
@@ -438,11 +388,9 @@
   {
    "key": "pad2_lock",
    "name": "Pad 2 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad2_reroll",
@@ -484,11 +432,9 @@
   {
    "key": "pad3_lock",
    "name": "Pad 3 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad3_reroll",
@@ -530,11 +476,9 @@
   {
    "key": "pad4_lock",
    "name": "Pad 4 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad4_reroll",
@@ -576,11 +520,9 @@
   {
    "key": "pad5_lock",
    "name": "Pad 5 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad5_reroll",
@@ -622,11 +564,9 @@
   {
    "key": "pad6_lock",
    "name": "Pad 6 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad6_reroll",
@@ -668,11 +608,9 @@
   {
    "key": "pad7_lock",
    "name": "Pad 7 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad7_reroll",
@@ -714,11 +652,9 @@
   {
    "key": "pad8_lock",
    "name": "Pad 8 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad8_reroll",
@@ -760,11 +696,9 @@
   {
    "key": "pad9_lock",
    "name": "Pad 9 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad9_reroll",
@@ -806,11 +740,9 @@
   {
    "key": "pad10_lock",
    "name": "Pad 10 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad10_reroll",
@@ -852,11 +784,9 @@
   {
    "key": "pad11_lock",
    "name": "Pad 11 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad11_reroll",
@@ -898,11 +828,9 @@
   {
    "key": "pad12_lock",
    "name": "Pad 12 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad12_reroll",
@@ -944,11 +872,9 @@
   {
    "key": "pad13_lock",
    "name": "Pad 13 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad13_reroll",
@@ -990,11 +916,9 @@
   {
    "key": "pad14_lock",
    "name": "Pad 14 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad14_reroll",
@@ -1036,11 +960,9 @@
   {
    "key": "pad15_lock",
    "name": "Pad 15 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad15_reroll",
@@ -1082,11 +1004,9 @@
   {
    "key": "pad16_lock",
    "name": "Pad 16 Lock",
-   "options": [
-    "OFF",
-    "ON"
-   ],
-   "default": 0
+   "min": 0,
+   "max": 1,
+   "display": "string"
   },
   {
    "key": "pad16_reroll",

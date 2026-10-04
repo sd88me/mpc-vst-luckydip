@@ -12,7 +12,7 @@ pass (see `docs/NOTES.md`).
 ## Using it
 Insert **Lucky Dip** as a track instrument. Pads answer MIDI notes 0-15 (the 16-pad drum layout) and 36-51.
 
-- **PADS 1-8 / PADS 9-16**: per pad, the sample name, its category, PLAY, REROLL, LOCK and a GAIN knob (Q-Links 1-8), and
+- **PADS 1-8 / PADS 9-16**: per pad, the sample name, its category, PLAY, REROLL, a lit LOCK key and a GAIN knob (Q-Links 1-8), and
   **GENERATE ALL** in the banner next to the status line.
 - **PAD EDIT page**: the category matrix for the selected pad (tap categories to build the pool it draws from; none =
   the default pool for that pad slot), the pad stepper, gain, lock, clear, reroll, favourite/reject, and the kit
