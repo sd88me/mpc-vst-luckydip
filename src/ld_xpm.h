@@ -202,7 +202,8 @@ inline ExportResult export_xpm(const std::string &dir, const std::string &name_i
     if (!make_dirs(d)) { r.error = "cannot create " + d; return r; }
     r.path = d + "/" + name + ".xpm";
     if (!write_text(r.path, text)) { r.error = "xpm write failed"; return r; }
-    std::string mf = "Lucky Dip MPC export: the files below were copied next to this .xpm.\n"
+    std::string mf = link ? "Lucky Dip MPC export: the files below are links to the originals, placed next to this .xpm (keep the originals where they are).\n" : "Lucky Dip MPC export: the files below were copied next to this .xpm.\n";
+    mf +=
                      "Any row tagged [MISSING] must be placed by hand (keep the left-hand name).\n\n";
     for (size_t i = 0; i < man.size(); i++) {
         XpmEntry &m = man[i];
