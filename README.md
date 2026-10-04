@@ -31,10 +31,15 @@ Lucky Dip is a native plugin (VST2) for MPC OS standalone devices. It was built 
   supported. Very long files are cut to 15 seconds on the pad (Lucky Dip is for one-shots).
 
 ## Install
-1. Download the latest `Lucky-Dip-<version>-mpc-armv7.zip` from this repo's **Releases** page and unzip it.
-2. Copy the folder to the device (for example with `scp`) and, as root over SSH, run `sh install.sh`. It saves a backup of
-   your settings, adds the plugin and restarts MPC, so **save your project first**.
-3. Add a track and choose **Lucky Dip** as its plugin. `uninstall.sh` removes it again.
+Needs root SSH access to the device (the installer edits the plugin list and restarts MPC; installing plugins this way is
+unofficial, so back up first and use it at your own risk). First-generation MPC OS standalone devices (32-bit ARM: Force,
+MPC Live / Live II, One, X, Key 61); tested on a Force.
+1. Download `Lucky-Dip-<version>-mpc-armv7.zip` from this repo's **Releases** page and unzip it.
+2. Copy the folder to the device and run the installer: `scp -r Lucky-Dip-<version> root@<device-ip>:/tmp/`, then
+   `ssh root@<device-ip> sh /tmp/Lucky-Dip-<version>/install.sh`. It stops MPC (**save your project first**), copies the plugin
+   into `/sdcard/Synths`, backs up `MPC.settings`, adds the plugin and starts MPC again. Running it again upgrades in place and
+   keeps your own files (`luckydip/`). `uninstall.sh` removes it.
+3. Add a track and choose **Lucky Dip** as its plugin.
 
 After updating to a new version, remove Lucky Dip from every track (or reopen the project) before judging the new one:
 MPC keeps a plugin loaded while any instance of it exists.
