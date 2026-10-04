@@ -6,13 +6,14 @@
 set -e
 cd "$(dirname "$0")"
 NAME='@NAME@'; SO='@SO_NAME@'; SKIN='@SKIN@'; UID_HEX='@UID@'; LEGACY_SO='@LEGACY_SO@'; USER_DATA='@USER_DATA@'
-SYNTHS=/sdcard/Synths; YES=0
+SYNTHS=/sdcard/Synths; YES=0; DEFER=0
 die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         -y) YES=1; shift ;;
+        -n) DEFER=1; shift ;;   # a batch caller has stopped MPC and starts it again after the last plugin
         -t) [ -n "$2" ] || die "-t needs a folder"; SYNTHS="$2"; shift 2 ;;
-        *) die "usage: sh uninstall.sh [-y] [-t <synths-dir>]" ;;
+        *) die "usage: sh uninstall.sh [-y] [-n] [-t <synths-dir>]" ;;
     esac
 done
 case "$SYNTHS" in /*) ;; *) die "-t must be an absolute path" ;; esac
@@ -26,15 +27,30 @@ fi
 SETTINGS="${MPC_SETTINGS:-$(ls /media/az01-internal/Settings/*/MPC.settings 2>/dev/null | head -n 1)}"
 [ -n "$SETTINGS" ] && [ -f "$SETTINGS" ] || die "MPC.settings not found"
 if [ $YES = 0 ]; then
-    printf "Remove %s? MPC will be stopped and restarted. Save your project first. [y/N] " "$NAME"
+    if [ $DEFER = 1 ]; then msg="MPC must already be stopped."; else msg="MPC will be stopped and restarted. Save your project first."; fi
+    printf "Remove %s? %s [y/N] " "$NAME" "$msg"
     read -r ok; case "$ok" in y|Y|yes) ;; *) echo "cancelled"; exit 1 ;; esac
 fi
 
-if [ -z "$MPC_INSTALL_TEST" ]; then
-    systemctl stop acvs
-    trap 'systemctl start acvs' EXIT
-    i=0; while pidof MPC >/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
-    pidof MPC >/dev/null && die "MPC did not stop"
+# MPC's service is acvs on stock firmware, inmusic-mpc on Hakai-enabled systems; use whichever exists (acvs if neither is found).
+mpc_service() {
+    if systemctl cat acvs >/dev/null 2>&1; then echo acvs
+    elif systemctl cat inmusic-mpc >/dev/null 2>&1; then echo inmusic-mpc
+    else echo acvs; fi
+}
+mpc_ctl() {   # stop | start; a test run logs the call to $MPC_TEST_LOG instead of touching MPC
+    if [ -n "$MPC_INSTALL_TEST" ]; then [ -z "$MPC_TEST_LOG" ] || echo "$1" >> "$MPC_TEST_LOG"; return 0; fi
+    systemctl "$1" "$(mpc_service)"
+}
+if [ $DEFER = 1 ]; then   # -n: the caller stops MPC before the first plugin and starts it after the last
+    [ -n "$MPC_INSTALL_TEST" ] || ! pidof MPC >/dev/null || die "MPC is running: with -n stop it first (stop the MPC service first, see INSTALL.md)"
+else
+    mpc_ctl stop
+    trap 'mpc_ctl start' EXIT
+    if [ -z "$MPC_INSTALL_TEST" ]; then
+        i=0; while pidof MPC >/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+        pidof MPC >/dev/null && die "MPC did not stop"
+    fi
 fi
 
 BAK="$SETTINGS.bak-$(echo "$SO" | sed 's/\.so$//')-$(date +%Y%m%d-%H%M%S)"

@@ -21,8 +21,12 @@ import os
 import re
 import shutil
 import stat
+import sys
 import tempfile
 import zipfile
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from catalog_check import max_glibc  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -143,7 +147,7 @@ restarts MPC). Projects that use the plugin will load without it. Files you adde
 
 1. Copy `portable/{skin}/` to `/sdcard/Synths/{skin}/`. It holds `{so}`, `plugin-meta.xml`, `version.xml`, `Plugin Skins/`
    and the data:
-{extra_md}2. Stop MPC: `systemctl stop acvs`
+{extra_md}2. Stop MPC: `systemctl stop acvs`. If there is no `acvs` service (`systemctl cat acvs` fails, as on some MPC OS 2.x versions and on Hakai-enabled systems), use `systemctl stop inmusic-mpc`.
 3. Back up the settings file, `MPC.settings` (on a Force: `/media/az01-internal/Settings/MPC/MPC.settings`).
 4. In `MPC.settings`, inside `<VALUE name="pluginList-arm"><KNOWNPLUGINS>`, add the line from `plugin-meta.xml` with
    `%payload-path%` replaced by `/sdcard/Synths`. If there is no `pluginList-arm` value yet, add one just before `</PROPERTIES>`:
@@ -154,7 +158,7 @@ restarts MPC). Projects that use the plugin will load without it. Files you adde
      </KNOWNPLUGINS>
    </VALUE>
    ```
-5. Start MPC: `systemctl start acvs`. If MPC shows default settings, restore your backup (the XML was malformed).
+5. Start MPC: `systemctl start acvs`, or `systemctl start inmusic-mpc` if that is the service you stopped. If MPC shows default settings, restore your backup (the XML was malformed).
 
 Edit `MPC.settings` only while MPC is stopped: MPC can save its own copy over a change made while it runs. Tools that
 rebuild the whole plugin list from the plugin folders in `Synths` keep this plugin, because it is such a folder.
@@ -167,15 +171,12 @@ See `SHA256SUMS`. Made with [mpc-vst-plugins](https://github.com/sd88me/mpc-vst-
            where="Instrument plugins" if kind == "instrument" else "Insert effects")
 open(os.path.join(root, "INSTALL.md"), "w").write(install_md)
 
-def max_glibc(path):
-    """Highest GLIBC_x.y[.z] symbol version the .so asks for, as 'x.y[.z]' (None if it needs none)."""
-    found = re.findall(rb"GLIBC_(\d+(?:\.\d+){1,2})", open(path, "rb").read())
-    return max((f.decode() for f in found), key=lambda v: tuple(map(int, v.split(".")))) if found else None
-
-
 def elf_machine(path):
     d = open(path, "rb").read(20)
-    return {40: "armv7", 62: "x86_64", 183: "aarch64", 3: "x86"}.get(int.from_bytes(d[18:20], "little"), "unknown") if d[:4] == b"\x7fELF" else "not-elf"
+    if d[:4] != b"\x7fELF":
+        return "not-elf"
+    arch = {40: "armv7", 62: "x86_64", 183: "aarch64", 3: "x86"}.get(int.from_bytes(d[18:20], "little"), "unknown")
+    return arch if arch != "armv7" or d[4:6] == b"\x01\x01" else "unknown"   # ARM, but not 32-bit little-endian
 
 
 def walk(top):

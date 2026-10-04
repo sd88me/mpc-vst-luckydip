@@ -9,6 +9,14 @@
    "display": "string"
   },
   {
+   "key": "sel_pad",
+   "name": "Pad",
+   "min": 1,
+   "max": 16,
+   "default": 1,
+   "display": "int"
+  },
+  {
    "key": "sel_gain",
    "name": "Gain",
    "min": 0,
@@ -67,14 +75,6 @@
     "ON"
    ],
    "default": 1
-  },
-  {
-   "key": "sel_pad",
-   "name": "Pad",
-   "min": 1,
-   "max": 16,
-   "default": 1,
-   "display": "int"
   },
   {
    "key": "sel_prev",

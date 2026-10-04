@@ -10,12 +10,12 @@ def text(key, name): P.append(dict(key=key, name=name, min=0, max=0, display="st
 def toggle(key, name, default=0): P.append(dict(key=key, name=name, options=["OFF", "ON"], default=default))
 
 text("status", "Status")
+P.append(dict(key="sel_pad", name="Pad", min=1, max=16, default=1, display="int"))
 P.append(dict(key="sel_gain", name="Gain", min=0, max=200, default=100, unit="%", display="int"))
 trig("generate", "Generate All"); trig("clear_all", "Clear All"); trig("normalise", "Match Levels")
 trig("export", "Export Kit"); trig("rescan", "Rescan Library"); trig("unlock_all", "Unlock All")
 toggle("prevent_dup", "No Duplicates", 1)
 # the selected pad (DETAIL page): every sel_* key acts on pad sel_pad
-P.append(dict(key="sel_pad", name="Pad", min=1, max=16, default=1, display="int"))
 trig("sel_prev", "Prev Pad", step_of="sel_pad", step_delta=-1)
 trig("sel_next", "Next Pad", step_of="sel_pad", step_delta=1)
 text("sel_name", "Sample"); text("sel_cat", "Category")

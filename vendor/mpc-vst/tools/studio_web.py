@@ -275,6 +275,8 @@ def widget_svg(w, art, params, base_dir):
                 art.ops.append(art.image(lk["img"], px, py, pw, ph, "stretch"))
             else:
                 art.run("tile|%d|%d|%d|%d|%s|%s|2" % (px, py, pw, ph, ss.LCD, ss.ACCENT))
+            for cmd in ss.popup_heading_cmds(w):
+                art.run(cmd)
             for o, (ox, oy, ow, oh) in enumerate(orects):
                 on = o == 0
                 art.run("seg|%d|%d|%d|%d|%s|%s|%s" % (ox, oy, ow, oh, ss.SEG_ON if on else ss.LCD,
@@ -286,8 +288,8 @@ def widget_svg(w, art, params, base_dir):
         dot = w.get("style") == "dotmatrix"
         live.append(live_text(x0 + h + 11, y0, w["w"] - 2 * h - 22, h, name, 26, ss.DISPLAY_INK if dot else ss.ACCENT))
     elif k == "list":
-        for i, (x, y, tw, th) in enumerate(ss.list_tiles(w)):
-            live.append(live_text(x + 12, y, tw - 24, th, "%s %d" % (w.get("key", ""), i + 1), 24, ss.ACCENT, "start"))
+        for (x, y, tw, th), sk in zip(ss.list_tiles(w), ss.list_keys(w)):
+            live.append(live_text(x + 12, y, tw - 24, th, sk.replace("_", " "), 24, ss.ACCENT, "start"))
     try:
         box = box_of(w, base_dir)
     except (KeyError, ValueError):

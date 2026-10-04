@@ -11,7 +11,8 @@
 ## Device (Force, MPC OS 3.9.1.2, 2026-10-03)
 - `tools/bench.sh`: PASS (worst p99 1.6%, worst block 2.9% of the 2902 us budget, with an empty kit).
 - Deployed to `/sdcard/Synths/sd88me - VST - Lucky Dip/`, registered in `pluginList-arm`; force_shadow still in MPC's environ.
-- Drum-layout patch: tested on this Force with a private copy (patched md5 31ef0968...). That copy was a mistake: the
+- Drum-layout patch (final): the shared script merged in mpc-vst-plugins (PR #142) is installed on the Force, patched md5
+  7cf96599...; Lucky Dip and Machinemodule get the 16-pad layout. Earlier: tested on this Force with a private copy (patched md5 31ef0968...). That copy was a mistake: the
   patch is shared in mpc-vst-plugins `tools/mpc_patch/`; Lucky Dip's name was added there (PR #142, patched md5
   7cf96599...) and the private copy removed from this repo. The device moves to the shared script next.
 
@@ -43,12 +44,14 @@ project save/reload, export loading in the Force's browser.
   create() started the first scan). Instances share one library: two instances with different sources fight over it.
 
 ## Text refresh (2026-10-04)
-The engine exposes a lock-free `"_refresh"` counter (bumped by scan/export status changes, a failed sample decode and
-FOLLOW moving the selection). The wrapper polls it and schedules `audioMasterUpdateDisplay`, so that text no longer waits for a touch.
-This needs the wrapper change in mpc-vst-plugins PR #157 (also applied to `vendor/mpc-vst/`). Not yet verified on a device.
+Upstream's wrapper (re-vendored, commit in `vendor/mpc-vst/VENDORED.md`) polls every `"display":"string"` param's text every 100 ms
+on the audio thread and asks for an UpdateDisplay when it changed, so scan/export status and the FOLLOW selection redraw by
+themselves (confirmed on a Force: status and selected pad update on their own). Because of that poll the engine's
+`get_param` never waits on the audio thread: it `try_lock`s there (the thread that calls `render`) and answers "no text" when a lock is
+busy. An earlier `_refresh` counter in the engine plus a wrapper PR (#157) did the same job and was dropped in favour of this.
 
 ## Open issues
-- ~~Async text does not refresh~~ (fixed by the `_refresh` counter, see above; pending device check).
+- ~~Async text does not refresh~~ (fixed by the wrapper poll, see above).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.
 - The host chunk buffer is 8 KiB: a kit with very long paths drops its later pads from the saved state.
 - Per-category pad colours on the MPC pad LEDs are not reachable (see the Machinemodule patch notes): all red.

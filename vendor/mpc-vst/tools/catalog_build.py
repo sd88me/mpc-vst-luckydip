@@ -34,7 +34,8 @@ import catalog_check  # noqa: E402
 
 ID = re.compile(r"[a-z0-9]+(-[a-z0-9]+)*")
 REPO = re.compile(r"[\w.-]+/[\w.-]+")
-KINDS = ("instrument", "effect")
+KINDS = ("instrument", "effect")   # what a plugin (or a build-yourself component) is
+ENTRY_KINDS = KINDS + ("addin",)    # an addin: a library MPC preloads (tools/release_addin.py, docs/ADDINS.md)
 DISTRIBUTIONS = ("release", "build-yourself")
 BUILD_YOURSELF_FIELDS = ("requires_user_files", "build", "components")
 TAG_VERSION = re.compile(r"v?(\d+)\.(\d+)\.(\d+)")
@@ -59,8 +60,8 @@ def check_entry(e, fname=None):
         p.append("file name must be <id>.json")
     if not REPO.fullmatch(e["repo"]):
         p.append("repo must be owner/name")
-    if e["kind"] not in KINDS:
-        p.append("kind must be one of %s" % ", ".join(KINDS))
+    if e["kind"] not in ENTRY_KINDS:
+        p.append("kind must be one of %s" % ", ".join(ENTRY_KINDS))
     if e["license"] not in OPEN_LICENSES and e.get("source_available") is not True:
         p.append("license %r is not on the open-source list: set \"source_available\": true if the source is public "
                  "but the license limits use (shown as a badge), see docs/CATALOG.md" % e["license"])
@@ -77,6 +78,8 @@ def check_entry(e, fname=None):
         for k in BUILD_YOURSELF_FIELDS:
             if k in e:
                 p.append("%s only applies to distribution \"build-yourself\"" % k)
+    elif e["kind"] == "addin":
+        p.append("an addin is distributed as a release zip (tools/release_addin.py), not build-yourself")
     else:
         p += check_build_yourself(e)
     return p
@@ -151,8 +154,9 @@ def load_registry(path):
         if not errs:
             if e["id"] in ids:
                 errs.append("duplicate id, also in " + ids[e["id"]])
-            if e["repo"].lower() in repos:
-                errs.append("repo already listed as " + repos[e["repo"].lower()])
+            rkey = (e["repo"].lower(), e.get("asset_pattern", ""))   # one repo may host several plugins, told apart by asset_pattern
+            if rkey in repos:
+                errs.append("repo already listed as " + repos[rkey] + (" (give each plugin in a shared repo its own asset_pattern)" if not rkey[1] else ""))
             for c in e.get("components", []):   # component ids share the id namespace with entries (its own id is fine)
                 if c["id"] != e["id"] and (c["id"] in ids or c["id"] in comp_ids):
                     errs.append("component id %r is already used by %s" % (c["id"], ids.get(c["id"]) and c["id"] or comp_ids[c["id"]]))
@@ -161,7 +165,7 @@ def load_registry(path):
         for x in errs:
             problems.append((f, x))
         if not errs:
-            ids[e["id"]], repos[e["repo"].lower()] = f, e["id"]
+            ids[e["id"]], repos[(e["repo"].lower(), e.get("asset_pattern", ""))] = f, e["id"]
             for c in e.get("components", []):
                 comp_ids[c["id"]] = e["id"]
             entries.append(e)
@@ -298,6 +302,7 @@ def build(entries, src, cache, yanked, keep=10, now=None):
         versions = []
         build_yourself = e.get("distribution", "release") == "build-yourself"
         releases = []
+        all_time = 0   # every published release asset ever, whether or not it is listed (invalid, yanked or past --keep)
         if not build_yourself:
             try:
                 releases = src.list_releases(e["repo"])
@@ -316,6 +321,9 @@ def build(entries, src, cache, yanked, keep=10, now=None):
                 continue
             tag = rel.get("tag_name")
             assets = [a for a in rel.get("assets", []) if fnmatch.fnmatch(a["name"], e.get("asset_pattern", "*-mpc-armv7.zip"))]
+            all_time += sum(a.get("download_count", 0) for a in assets)
+            if not assets and "asset_pattern" in e:
+                continue   # another plugin's release in a shared repo
             if len(assets) != 1:
                 problems.append({"id": e["id"], "tag": tag, "error": "expected one asset matching the pattern, found %d" % len(assets)})
                 continue
@@ -328,6 +336,9 @@ def build(entries, src, cache, yanked, keep=10, now=None):
             except Exception as ex:
                 problems.append({"id": e["id"], "tag": tag, "error": "download/validate failed: %s" % ex})
                 continue
+            if not errors and (rec["manifest"]["kind"] == "addin") != (e["kind"] == "addin"):
+                errors = ["the release is a%s but the registry entry's kind is %s" % (
+                    "n addin" if rec["manifest"]["kind"] == "addin" else " plugin", e["kind"])]
             if errors:
                 problems.append({"id": e["id"], "tag": tag, "error": "; ".join(errors)})
                 continue
@@ -364,7 +375,7 @@ def build(entries, src, cache, yanked, keep=10, now=None):
         item["versions"] = versions
         item["latest"] = next((v["version"] for v in versions if v["channel"] == "stable" and not v["yanked"]), None)
         item["latest_beta"] = next((v["version"] for v in versions if v["channel"] == "beta" and not v["yanked"]), None)
-        item["downloads"] = sum(v["downloads"] for v in versions)
+        item["downloads"] = all_time
         item["updated"] = max((v["date"] for v in versions if not v["yanked"]), default="")
         plugins.append(item)
     plugins.sort(key=lambda p: p["name"].lower())

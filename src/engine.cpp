@@ -20,6 +20,7 @@
 #include <mutex>
 #include <string>
 #include <thread>
+#include <pthread.h>
 #include <vector>
 #include <dirent.h>
 #include <sys/stat.h>
@@ -232,7 +233,7 @@ struct Inst {
     char loaded[NPADS];              /* 0 none, 1 playable, 2 failed to decode */
     float rms[NPADS];
     std::atomic<int> sel{0};            /* the selected pad (PAD EDIT page); follow moves it from the audio thread */
-    std::atomic<int> refresh{0};        /* "_refresh": bumped when on-screen text changes by itself; the wrapper polls it */
+    pthread_t audio_tid; std::atomic<bool> audio_known{false};   /* the thread that calls render(): it must never block */
     std::atomic<bool> follow{true};     /* the selection follows the last pad played */
     bool prevent_dup = true;
     std::string status, export_name;
@@ -254,7 +255,7 @@ struct Inst {
         for (int i = 0; i < NPADS; i++) { rms[i] = 0; buf[i] = 0; pending[i] = 0; voice[i].p = 0; voice[i].pos = 0; voice[i].amp = 0; }
     }
 
-    void set_status(const std::string &s) { { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); } ++refresh; }
+    void set_status(const std::string &s) { std::lock_guard<std::mutex> l(mu); status = s.substr(0, 23); }
     uint32_t new_seed() {
         uint64_t t = (uint64_t)std::chrono::steady_clock::now().time_since_epoch().count();
         uint32_t s = (uint32_t)(t ^ (t >> 32)) * 2654435761u + (++seed_ctr) * 40503u + (uint32_t)time(0);
@@ -308,7 +309,7 @@ struct Inst {
         bool ok = decode(j.path, *p);
         std::lock_guard<std::mutex> l(mu);
         if (!pads[j.pad].has || pads[j.pad].sample.path != j.path) { delete p; return; }   /* superseded */
-        if (!ok) { delete p; loaded[j.pad] = 2; ++refresh; return; }   /* the name now shows the "!" mark */
+        if (!ok) { delete p; loaded[j.pad] = 2; return; }
         rms[j.pad] = p->rms;
         retire(buf[j.pad].exchange(p));
         loaded[j.pad] = 1;
@@ -318,7 +319,6 @@ struct Inst {
         std::lock_guard<std::mutex> l(mu);
         if (r.ok) { export_name = j.name; status = r.warnings.empty() ? "Exported OK" : "Exported (see log)"; }
         else status = "Export failed";
-        ++refresh;
         if (!r.ok) fprintf(stderr, "luckydip: export failed: %s\n", r.error.c_str());
         for (size_t i = 0; i < r.warnings.size(); i++) fprintf(stderr, "luckydip: export: %s\n", r.warnings[i].c_str());
     }
@@ -549,7 +549,7 @@ struct Inst {
     void trigger(int pad, int vel) {
         if (pad < 0 || pad >= NPADS) return;
         pending[pad] = vel;
-        if (follow.load() && sel.load() != pad) { sel = pad; ++refresh; }       /* lock-free: this runs on the audio thread */
+        if (follow.load()) sel = pad;       /* lock-free: this runs on the audio thread */
     }
 
     /* ---- state ---- */
@@ -740,17 +740,21 @@ int put(char *buf, int n, const std::string &s) { snprintf(buf, n, "%s", s.c_str
 int e_get_param(void *h, const char *key, char *buf, int n) {
     Inst *in = (Inst *)h;
     if (n <= 0) return 0;
-    if (!strcmp(key, "_refresh")) { snprintf(buf, n, "%d", in->refresh.load()); return (int)strlen(buf) + 1; }   /* lock-free, no allocation */
     size_t kl = strlen(key);
     if (kl > 3 && !strcmp(key + kl - 3, "_on")) return 0;   /* the wrapper polls these from the audio thread: no lock */
     if (!strcmp(key, "state")) return put(buf, n, in->get_state());
+    /* The wrapper polls every text param from the audio thread (to notice text that changed by itself): there a lock that is
+     * busy (Generate holds them for a few ms) means "no text this time", never a wait. Other threads wait as usual. */
+    bool audio = in->audio_known.load() && pthread_equal(pthread_self(), in->audio_tid);
     if (!strcmp(key, "lib_info")) {
         Shared &sh = shared();
-        std::lock_guard<std::mutex> l(sh.mu);
+        std::unique_lock<std::mutex> l(sh.mu, std::defer_lock);
+        if (audio) { if (!l.try_lock()) return 0; } else l.lock();
         if (sh.scanning) return put(buf, n, "Scanning...");
         return put(buf, n, sh.lib->recs.empty() ? "No samples" : std::to_string(sh.lib->recs.size()) + " samples");
     }
-    std::lock_guard<std::mutex> l(in->mu);
+    std::unique_lock<std::mutex> l(in->mu, std::defer_lock);
+    if (audio) { if (!l.try_lock()) return 0; } else l.lock();
     if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 23));
     if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 23));
     if (!strcmp(key, "src_sub_name")) return put(buf, n, Inst::sub_label(in->src));
@@ -795,6 +799,7 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
 
 void e_render(void *h, int16_t *out, int frames) {
     Inst *in = (Inst *)h;
+    if (!in->audio_known.load()) { in->audio_tid = pthread_self(); in->audio_known = true; }
     for (int p = 0; p < NPADS; p++) {
         int v = in->pending[p].exchange(0);
         if (!v) continue;

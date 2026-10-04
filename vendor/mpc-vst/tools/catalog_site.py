@@ -10,6 +10,7 @@ tools/catalog_md.py) and joins the menu. Standard library only. Templates and CS
 """
 import argparse
 import glob
+import hashlib
 import json
 import os
 import shutil
@@ -52,10 +53,11 @@ def render_page(page, pages):
     return tpl
 
 
-def render(catalog, pages=()):
+def render(catalog, pages=(), helper_hashes=None):
     """The catalog page HTML for a catalog dict. The JSON is embedded in a <script type=application/json>, so '<' is escaped."""
     data = json.dumps(catalog, separators=(",", ":"), ensure_ascii=False).replace("<", "\\u003c").replace("\u2028", "\\u2028").replace("\u2029", "\\u2029")
-    tpl = read("index.template.html")
+    store = json.dumps({k: v for k, v in (helper_hashes or {}).items() if isinstance(v, str) and len(v) == 64 and all(c in "0123456789abcdef" for c in v)})
+    tpl = read("index.template.html").replace("/*STORE_JSON*/", store)
     marker = "/*CATALOG_JSON*/"
     if tpl.count(marker) != 1:
         raise SystemExit("template must contain the marker exactly once")
@@ -86,11 +88,50 @@ def atom(catalog, base=""):
     return "\n".join(out) + "\n"
 
 
+def _f(x):
+    return str(x).replace("\t", " ").replace("\n", " ").replace("\r", " ")
+
+
+def tsv(catalog, helpers):
+    """catalog.tsv for shell clients (tools/mpc-store.sh, BusyBox sh has no JSON): a header, one '#file' line per helper file
+    with its sha256, then one 'plugin' line per stable, non-yanked version of every downloadable (distribution 'release') plugin:
+    plugin id version latest kind name skin uid param_compat size sha256 url user_data defer   (tab separated, '-' when empty; defer is 1
+    when the zip's installer understands -n, 0 when it restarts MPC by itself). An addin (kind 'addin') has no skin or uid ('-'):
+    it installs to /data/mpc-addins/<id>."""
+    out = ["#mpc-catalog-tsv 1"]
+    for name, path in helpers:
+        out.append("#file\t%s\t%s" % (name, hashlib.sha256(open(path, "rb").read()).hexdigest()))
+    for p in catalog["plugins"]:
+        if p.get("distribution") != "release":
+            continue
+        for v in p.get("versions", []):
+            if v.get("yanked") or v.get("channel", "stable") != "stable" or not v.get("url"):
+                continue
+            m = v["manifest"]
+            row = ["plugin", p["id"], v["version"], "1" if v["version"] == p.get("latest") else "0", p["kind"], p["name"], m.get("skin") or "-",
+                   m.get("uid") or "-", v.get("param_compat", 1), v["size"], v["sha256"], v["url"], ",".join(m.get("user_data", [])) or "-",
+                   "1" if v.get("defer") else "0"]
+            out.append("\t".join(_f(x) for x in row))
+    return "\n".join(out) + "\n"
+
+
+# pages that no longer exist and where their content went (setup.html was merged into build.html on 2026-10-01)
+MOVED_PAGES = {"setup.html": "build.html"}
+
+
+def redirect_page(target):
+    t = html_escape(target, quote=True)
+    return ('<!doctype html>\n<html lang="en"><head><meta charset="utf-8"><title>Moved</title>'
+            '<meta http-equiv="refresh" content="0; url=%s"><link rel="canonical" href="%s"></head>'
+            '<body><p>This page moved to <a href="%s">%s</a>.</p></body></html>\n' % (t, t, t, t))
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--catalog", default="catalog/dist/catalog.json")
     ap.add_argument("--out", default="catalog/dist/site")
     ap.add_argument("--pages", default="catalog/pages", help="folder of guide pages (Markdown)")
+    ap.add_argument("--patches", default="catalog/patches.json", help="device patches the installer app may offer (docs/PATCHES.md); published as patches.json if it exists")
     ap.add_argument("--base-url", default="", help="public site URL, for the feed's self link")
     a = ap.parse_args()
     catalog = json.load(open(a.catalog, encoding="utf-8"))
@@ -98,11 +139,25 @@ def main():
         raise SystemExit("unsupported catalog schema %r" % catalog.get("schema"))
     os.makedirs(a.out, exist_ok=True)
     pages = load_pages(a.pages)
-    open(os.path.join(a.out, "index.html"), "w", encoding="utf-8").write(render(catalog, pages))
+    helpers = [("mpc-store.sh", os.path.join(HERE, "mpc-store.sh")), ("sync.sh", os.path.join(HERE, "release", "sync.sh")),
+               ("plugin_list.awk", os.path.join(HERE, "release", "plugin_list.awk"))]
+    hashes = {name: hashlib.sha256(open(path, "rb").read()).hexdigest() for name, path in helpers}
+    open(os.path.join(a.out, "index.html"), "w", encoding="utf-8").write(render(catalog, pages, hashes))
     for pg in pages:
         open(os.path.join(a.out, pg["slug"] + ".html"), "w", encoding="utf-8").write(render_page(pg, pages))
     open(os.path.join(a.out, "feed.xml"), "w", encoding="utf-8").write(atom(catalog, a.base_url))
     shutil.copy(a.catalog, os.path.join(a.out, "catalog.json"))
+    if os.path.isfile(a.patches):   # the installer app reads it from next to catalog.json; a manifest that fails its checks is not published
+        import patch_check
+        errors, _ = patch_check.check(json.load(open(a.patches, encoding="utf-8")))
+        if errors:
+            raise SystemExit("catalog/patches.json is not valid:\n  " + "\n  ".join(errors))
+        shutil.copy(a.patches, os.path.join(a.out, "patches.json"))
+    for name, path in helpers:   # the files a device downloads next to catalog.tsv, checked against the hashes listed in it
+        shutil.copy(path, os.path.join(a.out, name))
+    open(os.path.join(a.out, "catalog.tsv"), "w", encoding="utf-8", newline="\n").write(tsv(catalog, helpers))
+    for old, new in MOVED_PAGES.items():   # links to pages that were merged into another still work
+        open(os.path.join(a.out, old), "w", encoding="utf-8").write(redirect_page(new))
     open(os.path.join(a.out, ".nojekyll"), "w").close()
     print("%s (%d plugins, %d guide pages)" % (os.path.join(a.out, "index.html"), len(catalog["plugins"]), len(pages)))
 

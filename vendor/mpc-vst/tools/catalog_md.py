@@ -1,7 +1,8 @@
 """A small Markdown to HTML converter for the catalog site's guide pages (catalog/pages/*.md). Standard library only.
 
 Supports: `#`..`###` headings (with ids), paragraphs, `-`/`*` and `1.` lists (one level, wrapped lines allowed),
-fenced code blocks, `>` callouts, pipe tables, and inline `code`, **bold**, *italic*, [links](url). Everything is
+fenced code blocks, `>` callouts, pipe tables, collapsible sections (a line `::: details Title`, the content, then a line
+`:::`; no nesting), and inline `code`, **bold**, *italic*, [links](url). Everything is
 HTML-escaped first, so page text can't inject markup; link targets must be http(s), relative, or #anchors.
 A page starts with front matter between `---` lines: title, nav (menu label), order (menu position), summary.
 """
@@ -59,7 +60,17 @@ def render(src):
             para.clear()
     while i < len(lines):
         ln = lines[i]
-        if ln.startswith("```"):
+        if ln.startswith("::: details "):
+            flush()
+            title = ln[len("::: details "):].strip()
+            i += 1
+            inner = []
+            while i < len(lines) and lines[i].strip() != ":::":
+                inner.append(lines[i])
+                i += 1
+            i += 1
+            out.append('<details class="fold" id="%s"><summary>%s</summary>%s</details>' % (slug(title), inline(title), render("\n".join(inner))))
+        elif ln.startswith("```"):
             flush()
             i += 1
             code = []

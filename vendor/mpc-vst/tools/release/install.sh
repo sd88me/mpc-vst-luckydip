@@ -9,13 +9,14 @@
 set -e
 cd "$(dirname "$0")"
 NAME='@NAME@'; SO='@SO_NAME@'; SKIN='@SKIN@'; UID_HEX='@UID@'; LEGACY_SO='@LEGACY_SO@'; USER_DATA='@USER_DATA@'; EXTRAS='@EXTRAS@'
-SYNTHS=/sdcard/Synths; YES=0
+SYNTHS=/sdcard/Synths; YES=0; DEFER=0
 die() { echo "error: $*" >&2; exit 1; }
 while [ $# -gt 0 ]; do
     case "$1" in
         -y) YES=1; shift ;;
+        -n) DEFER=1; shift ;;   # a batch caller has stopped MPC and starts it again after the last plugin
         -t) [ -n "$2" ] || die "-t needs a folder"; SYNTHS="$2"; shift 2 ;;
-        *) die "usage: sh install.sh [-y] [-t <synths-dir>]" ;;
+        *) die "usage: sh install.sh [-y] [-n] [-t <synths-dir>]" ;;
     esac
 done
 case "$SYNTHS" in /*) ;; *) die "-t must be an absolute path" ;; esac
@@ -36,26 +37,51 @@ SETTINGS="${MPC_SETTINGS:-$(ls /media/az01-internal/Settings/*/MPC.settings 2>/d
 [ -f "portable/$SKIN/plugin-meta.xml" ] || die "this package is damaged: portable/$SKIN is missing"
 sha256sum -c SHA256SUMS >/dev/null 2>&1 || die "files damaged (SHA256SUMS mismatch): copy the folder again"
 mkdir -p "$SYNTHS" || die "cannot create $SYNTHS"
+# MPC cannot load a .so from a noexec mount (a Force's SSD is one): the plugin is listed but only shows "Load Plugin"
+MP=$(df -kP "$SYNTHS" 2>/dev/null | awk 'NR==2 {m = $6; for (i = 7; i <= NF; i++) m = m " " $i; print m}' | sed 's/ /\\040/g')
+if [ -n "$MP" ] && MP="$MP" awk '$2 == ENVIRON["MP"] {print $4}' /proc/mounts 2>/dev/null | grep -q '\(^\|,\)noexec\(,\|$\)'; then
+    echo "warning: $SYNTHS is on a noexec mount, so MPC will not be able to load this plugin from it. Install on the internal drive or an SD card (-t /sdcard/Synths)."
+fi
 grep -q "$SYNTHS" "$SETTINGS" || echo "warning: $SYNTHS isn't in MPC's SynthContentLocations; the skin may not show"
 
 echo "Installing $NAME @VERSION@:"
 echo "  $SYNTHS/$SKIN/ (skin, $SO and its data), and an entry in $SETTINGS"
 if [ $YES = 0 ]; then
-    printf "MPC will be stopped and restarted. Save your project first. Continue? [y/N] "
+    if [ $DEFER = 1 ]; then msg="MPC must already be stopped."; else msg="MPC will be stopped and restarted. Save your project first."; fi
+    printf "%s Continue? [y/N] " "$msg"
     read -r ok; case "$ok" in y|Y|yes) ;; *) echo "cancelled"; exit 1 ;; esac
 fi
 
-if [ -z "$MPC_INSTALL_TEST" ]; then
-    systemctl stop acvs
-    trap 'systemctl start acvs' EXIT
-    i=0; while pidof MPC >/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
-    pidof MPC >/dev/null && die "MPC did not stop"
+# MPC's service is acvs on stock firmware, inmusic-mpc on Hakai-enabled systems; use whichever exists (acvs if neither is found).
+mpc_service() {
+    if systemctl cat acvs >/dev/null 2>&1; then echo acvs
+    elif systemctl cat inmusic-mpc >/dev/null 2>&1; then echo inmusic-mpc
+    else echo acvs; fi
+}
+mpc_ctl() {   # stop | start; a test run logs the call to $MPC_TEST_LOG instead of touching MPC
+    if [ -n "$MPC_INSTALL_TEST" ]; then [ -z "$MPC_TEST_LOG" ] || echo "$1" >> "$MPC_TEST_LOG"; return 0; fi
+    systemctl "$1" "$(mpc_service)"
+}
+if [ $DEFER = 1 ]; then   # -n: the caller stops MPC before the first plugin and starts it after the last
+    [ -n "$MPC_INSTALL_TEST" ] || ! pidof MPC >/dev/null || die "MPC is running: with -n stop it first (stop the MPC service first, see INSTALL.md)"
+else
+    mpc_ctl stop
+    trap 'mpc_ctl start' EXIT
+    if [ -z "$MPC_INSTALL_TEST" ]; then
+        i=0; while pidof MPC >/dev/null && [ $i -lt 30 ]; do sleep 1; i=$((i + 1)); done
+        pidof MPC >/dev/null && die "MPC did not stop"
+    fi
 fi
 
 # 1. the folder: staged next to the target, the user's own files carried over, then swapped in
 NEW="$SYNTHS/$SKIN"; STAGE="$SYNTHS/.$SKIN.new"; OLD="$SYNTHS/.$SKIN.old"
 rm -rf "$STAGE" "$OLD"
 cp -a "portable/$SKIN" "$STAGE"
+SYNTHS_SED=$(printf '%s' "$SYNTHS" | sed 's/[|&\\]/\\&/g')   # the folder as a sed replacement (| & \ escaped)
+for f in "$STAGE"/Presets/*.xpl; do   # shipped presets name the plugin with the same placeholder as plugin-meta.xml
+    [ -f "$f" ] || continue
+    sed "s|%payload-path%|$SYNTHS_SED|g" "$f" > "$f.new" && mv "$f.new" "$f"
+done
 if [ -f MODES ]; then   # a zip unpacked on Windows or copied file by file loses exec bits and symlinks: put them back
     TAB=$(printf '\t')
     while IFS=$TAB read -r kind rel target; do
@@ -80,7 +106,7 @@ rm -rf "$OLD"
 # 2. the plugin-list entry: %payload-path% is the Synths folder; entries with the same file= or uid are replaced
 BAK="$SETTINGS.bak-$(echo "$SO" | sed 's/\.so$//')-$(date +%Y%m%d-%H%M%S)"
 cp "$SETTINGS" "$BAK"
-sed "s|%payload-path%|$SYNTHS|g" "portable/$SKIN/plugin-meta.xml" > "$SETTINGS.entry"
+sed "s|%payload-path%|$SYNTHS_SED|g" "portable/$SKIN/plugin-meta.xml" > "$SETTINGS.entry"
 awk -v mode=add -v file="$FILE" -v alt="$LEGACY_SO" -v uid="$UID_HEX" -v entryfile="$SETTINGS.entry" -f plugin_list.awk "$SETTINGS" > "$SETTINGS.new"
 rm -f "$SETTINGS.entry"
 n=$(grep -c "file=\"$FILE\"" "$SETTINGS.new" || true)

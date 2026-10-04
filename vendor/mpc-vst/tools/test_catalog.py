@@ -19,10 +19,30 @@ ENTRY = ('<PLUGIN name="Test Synth" format="VST" category="Synth" manufacturer="
          'numInputs="0" numOutputs="2" isShell="0" hasARAExtension="0" uniqueId="0"/>')
 
 
-def fake_so(path, machine=40, glibc=b"GLIBC_2.30"):
-    hdr = bytearray(b"\x7fELF" + bytes(16))
-    hdr[18:20] = machine.to_bytes(2, "little")
-    open(path, "wb").write(bytes(hdr) + b"\0" + glibc + b"\0")
+def fake_so(path, machine=40, glibc=b"GLIBC_2.30", elf_class=1):
+    """A 32-bit little-endian ELF with just a string table and a version-needs section naming glibc (one need of
+    libc.so.6 with one version), the shape the release tools read the glibc requirement from."""
+    strtab = b"\0libc.so.6\0" + glibc + b"\0"
+    verneed = (1).to_bytes(2, "little") + (1).to_bytes(2, "little") + (1).to_bytes(4, "little") \
+        + (16).to_bytes(4, "little") + (0).to_bytes(4, "little")                                  # Elf32_Verneed
+    verneed += (0).to_bytes(4, "little") + (0).to_bytes(2, "little") + (2).to_bytes(2, "little") \
+        + (11).to_bytes(4, "little") + (0).to_bytes(4, "little")                                  # Elf32_Vernaux
+    ehdr = bytearray(52)
+    ehdr[:4] = b"\x7fELF"
+    ehdr[4], ehdr[5], ehdr[6] = elf_class, 1, 1              # 32-bit (unless a test says otherwise), little-endian, version 1
+    ehdr[16:18] = (3).to_bytes(2, "little")                  # ET_DYN
+    ehdr[18:20] = machine.to_bytes(2, "little")
+    body = bytes(ehdr) + strtab + verneed
+    shoff = len(body)
+    ehdr[32:36] = shoff.to_bytes(4, "little")
+    ehdr[46:48] = (40).to_bytes(2, "little")
+    ehdr[48:50] = (3).to_bytes(2, "little")
+
+    def shdr(sh_type, off, size, link):
+        return (0).to_bytes(4, "little") + sh_type.to_bytes(4, "little") + (0).to_bytes(8, "little") \
+            + off.to_bytes(4, "little") + size.to_bytes(4, "little") + link.to_bytes(4, "little") + bytes(12)
+    shdrs = shdr(0, 0, 0, 0) + shdr(3, 52, len(strtab), 0) + shdr(0x6FFFFFFE, 52 + len(strtab), len(verneed), 1)
+    open(path, "wb").write(bytes(ehdr) + strtab + verneed + shdrs)
 
 
 class Base(unittest.TestCase):
@@ -30,9 +50,28 @@ class Base(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, self.tmp)
 
-    def build(self, version="1.2.0", machine=40, glibc=b"GLIBC_2.30", extra=()):
+    def resum(self, zpath, suffix, fn):
+        """Modify one member and fix SHA256SUMS, so only the check under test can object."""
+        import hashlib
+        out = zpath + ".r.zip"
+        with zipfile.ZipFile(zpath) as zin:
+            data = {i.filename: zin.read(i.filename) for i in zin.infolist()}
+            infos = list(zin.infolist())
+        for n in data:
+            if n.endswith(suffix):
+                data[n] = fn(data[n])
+        top = infos[0].filename.split("/")[0]
+        sums = "\n".join("%s  %s" % (hashlib.sha256(d).hexdigest(), n[len(top) + 1:]) for n, d in sorted(data.items())
+                         if not n.endswith("/") and not n.endswith("SHA256SUMS")) + "\n"
+        data[top + "/SHA256SUMS"] = sums.encode()
+        with zipfile.ZipFile(out, "w") as zout:
+            for i in infos:
+                zout.writestr(i, data[i.filename])
+        return out
+
+    def build(self, version="1.2.0", machine=40, glibc=b"GLIBC_2.30", extra=(), elf_class=1):
         t = self.tmp
-        fake_so(os.path.join(t, "test_synth.so"), machine, glibc)
+        fake_so(os.path.join(t, "test_synth.so"), machine, glibc, elf_class)
         skin = os.path.join(t, "Acme - VST - Test Synth")
         os.makedirs(os.path.join(skin, "Plugin Skins"), exist_ok=True)
         open(os.path.join(skin, "version.xml"), "w").write("<v/>")
@@ -65,25 +104,14 @@ class CatalogTest(Base):
         m = rec["manifest"]
         self.assertEqual((m["id"], m["arch"], m["max_glibc"], m["param_compat"]), ("test-synth", "armv7", "2.30", 1))
         self.assertEqual(len(rec["sha256"]), 64)
+        self.assertIs(rec["defer"], True)   # the current installer understands -n
 
-    def resum(self, zpath, suffix, fn):
-        """Modify one member and fix SHA256SUMS, so only the check under test can object."""
-        import hashlib
-        out = zpath + ".r.zip"
-        with zipfile.ZipFile(zpath) as zin:
-            data = {i.filename: zin.read(i.filename) for i in zin.infolist()}
-            infos = list(zin.infolist())
-        for n in data:
-            if n.endswith(suffix):
-                data[n] = fn(data[n])
-        top = infos[0].filename.split("/")[0]
-        sums = "\n".join("%s  %s" % (hashlib.sha256(d).hexdigest(), n[len(top) + 1:]) for n, d in sorted(data.items())
-                         if not n.endswith("/") and not n.endswith("SHA256SUMS")) + "\n"
-        data[top + "/SHA256SUMS"] = sums.encode()
-        with zipfile.ZipFile(out, "w") as zout:
-            for i in infos:
-                zout.writestr(i, data[i.filename])
-        return out
+    def test_an_installer_without_defer_is_flagged(self):
+        z = self.resum(self.build(), "install.sh", lambda d: d.replace(b"DEFER=", b"OLD="))
+        errors, warnings, rec = catalog_check.check(z, catalog=True)
+        self.assertEqual(errors, [])
+        self.assertIs(rec["defer"], False)
+        self.assertTrue([w for w in warnings if "install.sh differs" in w])
 
     def test_plugin_folder_layout(self):
         eng = os.path.join(self.tmp, "engine")
@@ -154,6 +182,8 @@ class CatalogTest(Base):
     def test_wrong_arch_and_glibc(self):
         e, _, _ = catalog_check.check(self.build(machine=62))
         self.assertTrue(any("armv7" in x for x in e))
+        e, _, _ = catalog_check.check(self.build(elf_class=2))   # ARM, but not the 32-bit class
+        self.assertTrue(any("armv7" in x for x in e) and any("not a 32-bit ARM library" in x for x in e), e)
         e, _, _ = catalog_check.check(self.build(glibc=b"GLIBC_2.38"))
         self.assertTrue(any("GLIBC" in x for x in e))
 
@@ -212,6 +242,54 @@ class CatalogTest(Base):
 import catalog_build  # noqa: E402
 
 
+class TilePresetTest(Base):
+    """tools/xpl.py: the Instruments-browser tile and the Default preset ship inside the skin folder."""
+
+    def test_tile_and_preset_ship_in_the_folder(self):
+        import xpl
+        import zlib
+        skin = os.path.join(self.tmp, "Acme - VST - Test Synth")
+        os.makedirs(skin)
+        png = os.path.join(self.tmp, "tile.png")
+        open(png, "wb").write(fake_png(270, 110))
+        xpl.write_tile(png, skin)
+        xpl.write_default_preset(skin, "Test Synth", "Acme", "TsSy", "test_synth.so")
+        z = self.build()
+        errors, warnings, rec = catalog_check.check(z, catalog=True)
+        self.assertEqual((errors, warnings), ([], []))
+        with zipfile.ZipFile(z) as zf:
+            top = zf.namelist()[0].split("/")[0]
+            base = "%s/portable/Acme - VST - Test Synth/" % top
+            self.assertIn(base + "Plugin Skins/browser_images/soundsmode.png", zf.namelist())
+            preset = zf.read(base + "Presets/0000-Default.xpl").decode()
+            inst = zf.read(top + "/install.sh").decode()
+        self.assertIn('file="%payload-path%/Acme - VST - Test Synth/test_synth.so"', preset)
+        self.assertIn('uid="54735379"', preset)   # 'TsSy'
+        self.assertIn("<preset>Default</preset>", preset)
+        self.assertIn('Presets/*.xpl', inst)   # the installer fills in the placeholder
+        state = preset.split("<state>")[1].split("</state>")[0]
+        b = xpl.b64dec(state)
+        self.assertEqual(b[:4] + b[8:12], b"CcnKFBCh")
+        self.assertEqual(b[16:20], b"TsSy")
+        self.assertEqual(b[-5:], b"\0\0\0\1\0")   # a 1-byte chunk: the empty state
+        self.assertEqual(xpl.b64enc(b), state)
+        self.assertEqual(xpl.b64dec(xpl.b64enc(bytes(range(256)))), bytes(range(256)))
+        self.assertEqual(xpl.b64enc(b"\x01"), "1.A.")   # six-bit groups, least-significant bits first, as JUCE writes them
+        open(png, "wb").write(fake_png(64, 64))
+        with self.assertRaises(SystemExit):
+            xpl.write_tile(png, skin)
+
+
+def fake_png(w, h):
+    import struct
+    import zlib
+    def chunk(t, d):
+        return struct.pack(">I", len(d)) + t + d + struct.pack(">I", zlib.crc32(t + d) & 0xffffffff)
+    raw = b"".join(b"\0" + bytes(w * 3) for _ in range(h))
+    return (b"\x89PNG\r\n\x1a\n" + chunk(b"IHDR", struct.pack(">IIBBBBB", w, h, 8, 2, 0, 0, 0))
+            + chunk(b"IDAT", zlib.compress(raw)) + chunk(b"IEND", b""))
+
+
 class LayoutWarningTest(unittest.TestCase):
     def test_hardcoded_data_path(self):
         import gen_vst
@@ -220,6 +298,126 @@ class LayoutWarningTest(unittest.TestCase):
         self.assertEqual(gen_vst.layout_warnings({"name": "X", "defines": {"MODULE_SUBDIR": '"x"', "MODULE_DIR": '"/sdcard/vst/x"'}}), [])
         self.assertEqual(gen_vst.layout_warnings({"name": "X", "defines": {"HAS_LFO_BPM": 1}}), [])
         self.assertEqual(gen_vst.layout_warnings({"name": "X"}), [])
+
+
+class AddinTest(Base):
+    """tools/release_addin.py packages an addin (a library MPC preloads) and catalog_check.py validates it."""
+    MANIFEST = ('# a test addin\nADDIN_ID=test-addin\nADDIN_NAME="Test addin"   # shown\nADDIN_SO=libtest.so\n'
+                'ADDIN_CONF=test.conf\nADDIN_FILES="helper"\nADDIN_DONE="Open it."\n')
+
+    def build_addin(self, manifest=None, machine=40, version="1.2.0", repo="acme/mpc-addin-test"):
+        d = os.path.join(self.tmp, "pkg")
+        os.makedirs(d, exist_ok=True)
+        open(os.path.join(d, "addin.manifest"), "w").write(manifest or self.MANIFEST)
+        fake_so(os.path.join(d, "libtest.so"), machine)
+        open(os.path.join(d, "test.conf"), "w").write("x=1\n")
+        open(os.path.join(d, "helper"), "w").write("data\n")
+        out = os.path.join(self.tmp, "dist")
+        r = subprocess.run([sys.executable, os.path.join(HERE, "release_addin.py"), "--dir", d, "--version", version,
+                            "--repo", repo, "--license", "MIT", "-o", out], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        return os.path.join(out, "Test-addin-%s-mpc-armv7.zip" % version)
+
+    def rezip(self, zpath, fn):
+        """Rewrite the package through fn({relative name: bytes}) and fix SHA256SUMS."""
+        import hashlib
+        with zipfile.ZipFile(zpath) as z:
+            top = z.infolist()[0].filename.split("/")[0]
+            data = {i.filename[len(top) + 1:]: z.read(i) for i in z.infolist()}
+        fn(data)
+        data["SHA256SUMS"] = "".join("%s  %s\n" % (hashlib.sha256(v).hexdigest(), k) for k, v in sorted(data.items())
+                                     if k != "SHA256SUMS").encode()
+        out = zpath + ".r.zip"
+        with zipfile.ZipFile(out, "w") as z:
+            for k, v in data.items():
+                z.writestr(top + "/" + k, v)
+        return out
+
+    def errors(self, zpath):
+        return catalog_check.check(zpath, catalog=True, expect_id="test-addin", expect_repo="acme/mpc-addin-test")[0]
+
+    def test_good_addin(self):
+        z = self.build_addin()
+        errors, warnings, rec = catalog_check.check(z, catalog=True, expect_id="test-addin", expect_repo="acme/mpc-addin-test")
+        self.assertEqual((errors, warnings), ([], []))
+        m = rec["manifest"]
+        self.assertEqual((m["kind"], m["layout"], m["so"], m["conf"], m["files"], m["user_data"]),
+                         ("addin", "addin", "libtest.so", "test.conf", ["helper"], ["test.conf"]))
+        self.assertTrue(rec["defer"])
+        with zipfile.ZipFile(z) as zf:
+            am = zf.read("Test-addin-1.2.0/addin.manifest").decode()
+            for f in catalog_check.ADDIN_SCRIPTS:
+                self.assertEqual(zf.read("Test-addin-1.2.0/" + f), open(os.path.join(HERE, "release", "addin", f), "rb").read())
+                self.assertEqual(zf.getinfo("Test-addin-1.2.0/" + f).external_attr >> 16 & 0o777, 0o755)
+        self.assertTrue(am.endswith("ADDIN_VERSION=1.2.0\n"), am)
+
+    def test_a_64_bit_class_arm_library_is_refused(self):
+        z = self.rezip(self.build_addin(), lambda f: f.update({"libtest.so": f["libtest.so"][:4] + b"\x02" + f["libtest.so"][5:]}))
+        self.assertIn("libtest.so is not a 32-bit ARM library", self.errors(z))
+
+    def test_release_refuses_bad_input(self):
+        for bad in ("ADDIN_ID=Test_Addin\nADDIN_SO=libtest.so\n", "ADDIN_ID=t\nADDIN_SO=libtest.so\nADDIN_FILES=missing\n",
+                    "ADDIN_ID=t\nADDIN_SO=$(reboot)\n", "ADDIN_ID=t\nADDIN_SO=libtest.so\nADDIN_CONF=install.sh\n"):
+            shutil.rmtree(os.path.join(self.tmp, "pkg"), ignore_errors=True)
+            d = os.path.join(self.tmp, "pkg"); os.makedirs(d)
+            open(os.path.join(d, "addin.manifest"), "w").write(bad)
+            fake_so(os.path.join(d, "libtest.so"))
+            open(os.path.join(d, "install.sh"), "w").write("")
+            r = subprocess.run([sys.executable, os.path.join(HERE, "release_addin.py"), "--dir", d, "--version", "1.0.0",
+                                "-o", os.path.join(self.tmp, "o")], capture_output=True, text=True)
+            self.assertNotEqual(r.returncode, 0, bad)
+
+    def test_tampering_is_caught(self):
+        z = self.build_addin()
+        cases = [
+            ("a manifest that runs code", lambda d: d.__setitem__("addin.manifest", d["addin.manifest"] + b"ADDIN_DONE=$(reboot)\n"),
+             "not a plain assignment"),
+            ("an unknown key", lambda d: d.__setitem__("addin.manifest", d["addin.manifest"] + b"LD_PRELOAD=/x.so\n"), "known key"),
+            ("a manifest that disagrees", lambda d: d.__setitem__("addin.manifest", d["addin.manifest"].replace(b"libtest.so", b"other.so")),
+             "ADDIN_SO"),
+            ("an extra file", lambda d: d.__setitem__("payload.sh", b"x"), "unexpected file payload.sh"),
+            ("a missing data file", lambda d: d.pop("helper"), "missing helper"),
+            ("a library that is not ELF", lambda d: d.__setitem__("libtest.so", b"#!/bin/sh"), "not an ELF"),
+            ("an x86 library", lambda d: d.__setitem__("libtest.so", d["libtest.so"][:18] + (62).to_bytes(2, "little") + d["libtest.so"][20:]),
+             "32-bit ARM"),
+            ("a plugin kind", lambda d: d.__setitem__("mpc-plugin.json", d["mpc-plugin.json"].replace(b'"kind": "addin"', b'"kind": "effect"')),
+             "kind must be addin"),
+            ("no installer library", lambda d: d.pop("addin-lib.sh"), "missing addin-lib.sh"),
+        ]
+        for what, fn, expect in cases:
+            errors = self.errors(self.rezip(z, fn))
+            self.assertTrue(any(expect in e for e in errors), "%s: %s" % (what, errors))
+
+    def test_modified_installer_warns(self):
+        z = self.rezip(self.build_addin(), lambda d: d.__setitem__("install.sh", d["install.sh"] + b"\n# changed\n"))
+        errors, warnings, _ = catalog_check.check(z, catalog=True)
+        self.assertEqual(errors, [])
+        self.assertTrue(any("install.sh differs" in w for w in warnings), warnings)
+
+    def test_registry_build_and_tsv(self):
+        import catalog_build, catalog_site
+        entry = {"id": "test-addin", "name": "Test addin", "author": "A", "repo": "acme/mpc-addin-test", "kind": "addin",
+                 "license": "MIT", "summary": "s"}
+        self.assertEqual(catalog_build.check_entry(entry), [])
+        self.assertTrue(catalog_build.check_entry(dict(entry, distribution="build-yourself")))
+        rel = lambda tag, aid: {"tag_name": tag, "prerelease": False, "draft": False, "published_at": "2026-10-02T00:00:00Z",
+                                "body": "", "assets": [{"id": aid, "name": "x-mpc-armv7.zip", "browser_download_url": "https://x/a.zip"}]}
+        gh = FakeGitHub({"acme/mpc-addin-test": [rel("v1.2.0", 1)]}, {1: self.build_addin()})
+        cat, problems = catalog_build.build([entry], gh, os.path.join(self.tmp, "cache"), set())
+        self.assertEqual(problems, [])
+        self.assertEqual(cat["plugins"][0]["latest"], "1.2.0")
+        row = catalog_site.tsv(cat, []).splitlines()[1].split("\t")
+        self.assertEqual(row[:8], ["plugin", "test-addin", "1.2.0", "1", "addin", "Test addin", "-", "-"])
+        self.assertEqual((row[12], row[13]), ("test.conf", "1"))
+        # an addin release listed under an instrument entry (or the reverse) is refused
+        cat, problems = catalog_build.build([dict(entry, kind="instrument")], gh, os.path.join(self.tmp, "cache"), set())
+        self.assertEqual(cat["plugins"][0]["versions"], [])
+        self.assertIn("is an addin", problems[0]["error"])
+
+    def test_installer_shell_tests(self):
+        """tools/test_addin.sh: the LD_PRELOAD installer against scratch systemd trees."""
+        r = subprocess.run(["bash", os.path.join(HERE, "test_addin.sh")], capture_output=True, text=True)
+        self.assertEqual(r.returncode, 0, r.stdout[-3000:] + r.stderr[-2000:])
 
 
 class FakeGitHub:
@@ -254,7 +452,7 @@ class BuildTest(Base):
         self.assertEqual([v["version"] for v in p["versions"]], ["1.1.0", "1.0.0"])
         self.assertEqual(p["latest"], "1.1.0")
         self.assertTrue(p["versions"][1]["yanked"])
-        self.assertEqual(p["downloads"], 6)
+        self.assertEqual(p["downloads"], 9)   # all time: every published zip, including the yanked 1.0.0 and the invalid 1.2.0
         self.assertEqual(sorted((x["tag"] for x in problems)), ["v1.2.0", "v1.3.0-b"])
 
     def test_tested_json_attaches_to_matching_version(self):
@@ -336,20 +534,54 @@ class PagesTest(unittest.TestCase):
         self.assertIn("<th>h1</th>", html)
         self.assertNotIn("<b>", html)
 
-    def test_install_page_explains_where_to_build(self):
+    def test_install_page_is_for_installing_and_the_build_page_for_building(self):
         pages = catalog_site.load_pages(os.path.join(HERE, "..", "catalog", "pages"))
-        html = catalog_site.render_page([p for p in pages if p["slug"] == "install"][0], pages)
-        self.assertIn('id="plugins-you-build-yourself"', html)   # the card links here
-        self.assertIn("on <strong>your computer</strong>", html)
-        self.assertIn('id="easy-option-use-termius-instead-of-typing-commands"', html)   # linked from the Setup page
+        by = {p["slug"]: p for p in pages}
+        inst = catalog_site.render_page(by["install"], pages)
+        build = catalog_site.render_page(by["build"], pages)
+        # building (Docker, git, WSL, the build-yourself steps) lives on the Build page only
+        self.assertIn('id="plugins-you-build-yourself"', build)
+        self.assertIn("on <strong>your computer</strong>", build)
+        for needle in ("Install Docker", "Install git and Python 3", "docker run --rm hello-world"):
+            self.assertIn(needle, build)
+            self.assertNotIn(needle, inst)
+        self.assertNotIn('id="plugins-you-build-yourself"', inst)
+        self.assertIn('href="build.html#plugins-you-build-yourself"', inst)   # a pointer, not the steps
+        self.assertIn('id="with-termius-click-instead-of-type"', inst)
+        self.assertIn('id="check-that-you-can-reach-your-device"', inst)
+        self.assertNotIn("setup.html", inst + build)
         idx = catalog_site.render({"schema": 1, "generated": "x", "plugins": []}, pages)
         self.assertIn("Run this on your computer (needs Docker), not on the device.", idx)
-        self.assertIn('install.html#plugins-you-build-yourself', idx)
+        self.assertIn('build.html#plugins-you-build-yourself', idx)
+        self.assertNotIn("setup.html", idx)
+
+    def test_old_page_addresses_redirect(self):
+        self.assertEqual(catalog_site.MOVED_PAGES["setup.html"], "build.html")
+        html = catalog_site.redirect_page("build.html")
+        self.assertIn('http-equiv="refresh" content="0; url=build.html"', html)
+        self.assertIn('<a href="build.html">build.html</a>', html)
+
+    def test_install_panel_gets_only_valid_hashes_and_ids_are_not_markup(self):
+        good = "a" * 64
+        html = catalog_site.render({"schema": 1, "generated": "x", "plugins": []}, (), {"mpc-store.sh": good, "sync.sh": "</script><b>", "x": 5})
+        self.assertIn('{"mpc-store.sh": "%s"}' % good, html)
+        self.assertNotIn("</script><b>", html)
+        self.assertIn('id="inst"', html)
+        self.assertEqual(html.count("/*STORE_JSON*/"), 0)
+
+    def test_collapsible_sections(self):
+        html = catalog_md.render("Intro\n\n::: details By hand <b>x</b>\nStep **one** `a<b`\n\n```\nssh root@x\n```\n:::\n\nAfter")
+        self.assertIn('<details class="fold" id="by-hand-x"><summary>By hand &lt;b&gt;x&lt;/b&gt;</summary>', html)
+        self.assertIn("<strong>one</strong>", html)
+        self.assertIn("<pre><code>ssh root@x</code></pre>", html)
+        self.assertNotIn("<b>", html)
+        self.assertTrue(html.index("</details>") < html.index("After"))
+        self.assertEqual(html.count("<details"), 1)
 
     def test_repo_pages_render_with_nav(self):
         pages = catalog_site.load_pages(os.path.join(HERE, "..", "catalog", "pages"))
-        self.assertGreaterEqual(len(pages), 5)
-        self.assertEqual([p["slug"] for p in pages], ["setup", "install", "build", "workflow", "add"])
+        self.assertGreaterEqual(len(pages), 4)
+        self.assertEqual([p["slug"] for p in pages], ["install", "build", "workflow", "add"])
         for p in pages:
             html = catalog_site.render_page(p, pages)
             self.assertIn('aria-current="page"', html)
@@ -559,7 +791,9 @@ class InstallerTest(Base):
         open(os.path.join(self.legacy_root, "sdcard", "vst", "test_synth.so"), "wb").write(b"old")
 
     def run_script(self, script, *args):
-        env = dict(os.environ, MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_LEGACY_ROOT=self.legacy_root)
+        self.ctl_log = os.path.join(self.tmp, "mpc_ctl.log")
+        env = dict(os.environ, MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_LEGACY_ROOT=self.legacy_root,
+                   MPC_TEST_LOG=self.ctl_log)
         if os.environ.get("INSTALLER_TEST_PATH"):   # e.g. a folder of BusyBox applets, to imitate the device's userland
             env["PATH"] = os.environ["INSTALLER_TEST_PATH"]
         return subprocess.run(["sh", os.path.join(self.top, script), "-y", "-t", self.synths, *args], cwd=self.top, env=env,
@@ -650,6 +884,36 @@ class InstallerTest(Base):
         self.assertEqual(os.readlink(os.path.join(ib, "py", "bin", "python3")), "python3.11")
         self.assertFalse(os.access(os.path.join(ib, "data.txt"), os.X_OK))
 
+    def mpc_calls(self):
+        return open(self.ctl_log).read().split() if os.path.exists(self.ctl_log) else []
+
+    def test_install_and_uninstall_stop_and_start_mpc_once(self):
+        self.assertEqual(self.run_script("install.sh").returncode, 0)
+        self.assertEqual(self.mpc_calls(), ["stop", "start"])
+        os.remove(self.ctl_log)
+        self.assertEqual(self.run_script("uninstall.sh").returncode, 0)
+        self.assertEqual(self.mpc_calls(), ["stop", "start"])
+
+    def test_defer_flag_leaves_mpc_alone_for_a_batch(self):
+        r = self.run_script("install.sh", "-n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.mpc_calls(), [])                                   # the caller owns stop/start
+        self.assertIn("Test Synth", self.entries())                              # but the install itself happened
+        r = self.run_script("uninstall.sh", "-n")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.mpc_calls(), [])
+        self.assertNotIn("Test Synth", self.entries())
+
+    def test_a_failed_settings_edit_still_restarts_mpc_unless_deferred(self):
+        open(self.settings_path, "w").write("not xml at all\n")                  # the edit finds nowhere to put the entry
+        r = self.run_script("install.sh")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.mpc_calls(), ["stop", "start"])                    # MPC is never left stopped
+        os.remove(self.ctl_log)
+        r = self.run_script("install.sh", "-n")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(self.mpc_calls(), [])                                   # the batch caller decides what to do
+
     def test_reinstall_is_idempotent_and_keeps_user_files(self):
         self.assertEqual(self.run_script("install.sh").returncode, 0)
         rom = os.path.join(self.synths, self.SKIN, "roms", "mine.rom")
@@ -693,6 +957,378 @@ class InstallerTest(Base):
         r = self.run_script("install.sh")
         self.assertNotEqual(r.returncode, 0)
         self.assertEqual(open(self.settings_path).read(), broken)
+
+
+
+
+class SyncTest(Base):
+    """tools/release/sync.sh: the plugin list follows the plugin folders (device checks skipped, MPC.settings is a copy)."""
+    SKIN = "Acme - VST - Test Synth"
+    ONLY_OTHER = SETTINGS_XML.replace(
+        '      <PLUGIN name="Test Synth" format="VST" manufacturer="Acme" version="1.0" file="/sdcard/vst/test_synth.so" uid="1a2b3c4d" isInstrument="1"/>\n', "")
+
+    def setUp(self):
+        super().setUp()
+        z = self.build()
+        pkg = os.path.join(self.tmp, "pkg")
+        with zipfile.ZipFile(z) as zf:
+            zf.extractall(pkg)
+        self.top = os.path.join(pkg, os.listdir(pkg)[0])
+        self.synths = os.path.join(self.tmp, "device", "Synths")
+        os.makedirs(self.synths)
+        shutil.copytree(os.path.join(self.top, "portable", self.SKIN), os.path.join(self.synths, self.SKIN))
+        self.settings_path = os.path.join(self.tmp, "MPC.settings")
+        self.log = os.path.join(self.tmp, "mpc_ctl.log")
+        self.settings(self.ONLY_OTHER)
+
+    def settings(self, text):
+        open(self.settings_path, "w").write(text)
+
+    def sync(self, *args, roots=None):
+        env = dict(os.environ, MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_TEST_LOG=self.log)
+        if os.environ.get("INSTALLER_TEST_PATH"):
+            env["PATH"] = os.environ["INSTALLER_TEST_PATH"]
+        cmd = ["sh", os.path.join(HERE, "release", "sync.sh"), "-y", *args]
+        for r in (roots or [self.synths]):
+            cmd += ["-t", r]
+        return subprocess.run(cmd, env=env, capture_output=True, text=True)
+
+    def entries(self):
+        import xml.etree.ElementTree as ET
+        return {e.get("name"): e.get("file") for e in ET.parse(self.settings_path).getroot().iter("PLUGIN")}
+
+    def calls(self):
+        return open(self.log).read().split() if os.path.exists(self.log) else []
+
+    def test_registers_an_unregistered_folder_and_touches_nothing_else(self):
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        e = self.entries()
+        self.assertEqual(e["Test Synth"], os.path.join(self.synths, self.SKIN, "test_synth.so"))
+        self.assertEqual(e["Other"], "/sdcard/vst/other.so")                     # not in a Synths folder: left alone
+        self.assertEqual(self.calls(), ["stop", "start"])
+        self.assertTrue([n for n in os.listdir(self.tmp) if n.startswith("MPC.settings.bak-sync-")])
+
+    def test_second_run_does_nothing_and_does_not_restart_mpc(self):
+        self.assertEqual(self.sync().returncode, 0)
+        before = open(self.settings_path).read()
+        os.remove(self.log)
+        r = self.sync()
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("Nothing to do", r.stdout)
+        self.assertEqual(open(self.settings_path).read(), before)
+        self.assertEqual(self.calls(), [])
+
+    def test_removes_an_entry_whose_file_in_a_synths_folder_is_gone(self):
+        gone = os.path.join(self.synths, "Gone - VST - X", "x.so")
+        self.settings(self.ONLY_OTHER.replace("    </KNOWNPLUGINS>",
+            '      <PLUGIN name="Gone" format="VST" manufacturer="x" version="1.0" file="%s" uid="deadbeef" isInstrument="1"/>\n    </KNOWNPLUGINS>' % gone))
+        self.assertIn("Gone", self.entries())
+        self.assertEqual(self.sync().returncode, 0)
+        e = self.entries()
+        self.assertNotIn("Gone", e)
+        self.assertIn("Other", e)                                                # missing file, but not in a Synths folder: kept
+        self.assertIn("Test Synth", e)
+
+    def test_a_folder_without_its_so_is_not_registered_and_its_old_entry_goes(self):
+        self.assertEqual(self.sync().returncode, 0)
+        self.assertIn("Test Synth", self.entries())
+        os.remove(os.path.join(self.synths, self.SKIN, "test_synth.so"))         # meta.xml stays, the plugin file is gone
+        self.assertEqual(self.sync().returncode, 0)
+        self.assertNotIn("Test Synth", self.entries())
+
+    def test_an_old_layout_entry_with_the_same_uid_is_replaced(self):
+        self.settings(SETTINGS_XML)                                              # Test Synth at /sdcard/vst/test_synth.so (not there)
+        self.assertEqual(self.sync().returncode, 0)
+        self.assertEqual(self.entries()["Test Synth"], os.path.join(self.synths, self.SKIN, "test_synth.so"))
+        self.assertEqual(len(self.entries()), 2)
+
+    def test_dry_run_and_deferred_mode(self):
+        before = open(self.settings_path).read()
+        r = self.sync("--dry-run")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("add", r.stdout)
+        self.assertEqual(open(self.settings_path).read(), before)
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.sync("-n").returncode, 0)                          # -n: the caller stops and starts MPC
+        self.assertEqual(self.calls(), [])
+        self.assertIn("Test Synth", self.entries())
+
+    def test_the_same_folder_through_two_roots_is_registered_once(self):
+        alias = os.path.join(self.tmp, "device", "SynthsAlias")
+        os.symlink(self.synths, alias)
+        self.assertEqual(self.sync(roots=[self.synths, alias]).returncode, 0)
+        self.assertEqual(len([n for n in self.entries() if n == "Test Synth"]), 1)
+        self.assertEqual(self.entries()["Test Synth"], os.path.join(self.synths, self.SKIN, "test_synth.so"))   # first root wins
+
+    def test_a_broken_settings_file_is_left_unchanged_and_mpc_is_restarted(self):
+        self.settings("not xml at all\n")
+        r = self.sync()
+        self.assertNotEqual(r.returncode, 0)
+        self.assertEqual(open(self.settings_path).read(), "not xml at all\n")
+        self.assertEqual(self.calls(), ["stop", "start"])
+
+class StoreTest(Base):
+    """tools/mpc-store.sh against a local fake catalog (catalog.tsv from catalog_site.tsv) and zips served over HTTP."""
+    SKIN = "Acme - VST - Test Synth"
+
+    def setUp(self):
+        super().setUp()
+        if not (os.environ.get("INSTALLER_TEST_PATH") or shutil.which("unzip")):
+            self.skipTest("needs unzip (the device has it in BusyBox); or set INSTALLER_TEST_PATH to a folder of BusyBox applets")
+        import http.server
+        import threading
+        import hashlib
+        import catalog_site
+        self.web = os.path.join(self.tmp, "web")
+        os.makedirs(self.web)
+        self.hashlib, self.catalog_site = hashlib, catalog_site
+        self.versions = []
+        for v in ("1.2.0", "1.3.0", "2.0.0"):
+            z = self.build(version=v, extra=("--user-data", "roms"))
+            shutil.copy(z, self.web)
+            self.versions.append((v, os.path.join(self.web, os.path.basename(z))))
+        for name, path in (("sync.sh", os.path.join(HERE, "release", "sync.sh")), ("plugin_list.awk", os.path.join(HERE, "release", "plugin_list.awk"))):
+            shutil.copy(path, os.path.join(self.web, name))
+        import functools
+
+        class Quiet(http.server.SimpleHTTPRequestHandler):
+            def log_message(self, *a):
+                pass
+        self.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0), functools.partial(Quiet, directory=self.web))
+        self.port = self.httpd.server_address[1]
+        threading.Thread(target=self.httpd.serve_forever, daemon=True).start()
+        self.addCleanup(self.httpd.shutdown)
+        self.write_catalog(["1.2.0"])
+        self.synths = os.path.join(self.tmp, "device", "Synths")
+        self.settings_path = os.path.join(self.tmp, "MPC.settings")
+        open(self.settings_path, "w").write(SyncTest.ONLY_OTHER)
+        self.log = os.path.join(self.tmp, "mpc_ctl.log")
+
+    def write_catalog(self, published, addins=()):
+        vs = []
+        for v, path in self.versions:
+            if v not in published:
+                continue
+            m = catalog_check.check(path, catalog=True)[2]["manifest"]
+            vs.append({"version": v, "size": os.path.getsize(path), "sha256": self.hashlib.sha256(open(path, "rb").read()).hexdigest(),
+                       "param_compat": int(v.split(".")[0]), "manifest": m, "channel": "stable", "yanked": False,
+                       "url": "http://127.0.0.1:%d/%s" % (self.port, os.path.basename(path))})
+        vs.sort(key=lambda x: [int(n) for n in x["version"].split(".")], reverse=True)
+        cat = {"schema": 1, "plugins": [{"id": "test-synth", "name": "Test Synth", "kind": "instrument", "distribution": "release",
+                                          "latest": vs[0]["version"], "versions": vs},
+                                         {"id": "byo", "name": "Build Yourself", "kind": "instrument", "distribution": "build-yourself", "versions": []}]}
+        avs = []
+        for v in addins:   # (version, zip) of the test addin
+            path = os.path.join(self.web, os.path.basename(v[1]))
+            shutil.copy(v[1], path)
+            avs.insert(0, {"version": v[0], "size": os.path.getsize(path), "sha256": self.hashlib.sha256(open(path, "rb").read()).hexdigest(),
+                           "param_compat": int(v[0].split(".")[0]), "manifest": catalog_check.check(path, catalog=True)[2]["manifest"],
+                           "channel": "stable", "yanked": False, "defer": True, "url": "http://127.0.0.1:%d/%s" % (self.port, os.path.basename(path))})
+        if avs:
+            cat["plugins"].append({"id": "test-addin", "name": "Test addin", "kind": "addin", "distribution": "release",
+                                   "latest": avs[0]["version"], "versions": avs})
+        helpers = [(n, os.path.join(self.web, n)) for n in ("sync.sh", "plugin_list.awk")]
+        open(os.path.join(self.web, "catalog.tsv"), "w").write(self.catalog_site.tsv(cat, helpers))
+
+    def store(self, *args, stdin=""):
+        env = dict(os.environ, MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_TEST_LOG=self.log, MPC_STORE_TMP=self.tmp,
+                   MPC_LEGACY_ROOT=os.path.join(self.tmp, "nolegacy"),
+                   ADDIN_INSTALL_TEST="1", SYSTEMD_ROOT=os.path.join(self.tmp, "root"), ADDIN_TEST_LOG=os.path.join(self.tmp, "addin.log"),
+                   MPC_ADDINS=os.path.join(self.tmp, "addins"))
+        if os.environ.get("INSTALLER_TEST_PATH"):
+            env["PATH"] = os.environ["INSTALLER_TEST_PATH"]
+        cmd = ["sh", os.path.join(HERE, "mpc-store.sh"), "-y", "-t", self.synths, "--url", "http://127.0.0.1:%d/catalog.tsv" % self.port, *args]
+        return subprocess.run(cmd, env=env, capture_output=True, text=True, input=stdin)
+
+    def calls(self):
+        return open(self.log).read().split() if os.path.exists(self.log) else []
+
+    def entries(self):
+        import xml.etree.ElementTree as ET
+        return {e.get("name"): e.get("file") for e in ET.parse(self.settings_path).getroot().iter("PLUGIN")}
+
+    def state(self):
+        p = os.path.join(self.synths, ".mpc-store")
+        return [l.split("\t") for l in open(p).read().splitlines()] if os.path.exists(p) else []
+
+    def test_list_shows_downloadable_plugins_only(self):
+        r = self.store("list")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("test-synth", r.stdout)
+        self.assertNotIn("byo", r.stdout)
+        os.makedirs(os.path.join(self.synths, self.SKIN))                        # a folder somebody copied there by hand
+        self.assertIn("manual", self.store("list").stdout)
+
+    def test_install_verifies_installs_and_restarts_mpc_once(self):
+        r = self.store("install", "test-synth")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertTrue(os.path.exists(os.path.join(self.synths, self.SKIN, "test_synth.so")))
+        self.assertEqual(self.entries()["Test Synth"], os.path.join(self.synths, self.SKIN, "test_synth.so"))
+        self.assertIn("Other", self.entries())
+        self.assertEqual(self.calls(), ["stop", "start"])
+        self.assertEqual(self.state(), [["test-synth", "1.2.0", self.SKIN, "1"]])
+
+    def test_an_old_installer_is_not_given_n_and_restarts_mpc_by_itself(self):
+        import re
+        v, path = self.versions[0]
+
+        def old(data):   # what Dexed 1.0.1 and the other early releases look like: no -n option, no DEFER
+            data = re.sub(rb"\n\s*-n\) DEFER=1;[^\n]*", b"", data)
+            return data.replace(b"DEFER", b"XFER")
+        new = self.resum(path, "install.sh", old)
+        shutil.copy(new, path)
+        self.write_catalog([v])
+        r = self.store("install", "test-synth")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("restarts MPC by itself", r.stdout)
+        self.assertEqual(self.entries()["Test Synth"], os.path.join(self.synths, self.SKIN, "test_synth.so"))
+        self.assertEqual(self.calls(), ["stop", "start"])    # its own stop and start; the store adds none
+        self.assertEqual(self.state()[0][:2], ["test-synth", v])
+
+    MANIFEST = AddinTest.MANIFEST
+
+    def addin_unit(self):
+        d = os.path.join(self.tmp, "root", "usr", "lib", "systemd", "system")
+        os.makedirs(d, exist_ok=True)
+        self.unit = os.path.join(d, "acvs.service")
+        open(self.unit, "w").write("[Service]\nEnvironment=LD_PRELOAD=/usr/lib/x.so\n")
+        return os.path.join(self.tmp, "addins", "test-addin")
+
+    def test_addins_install_with_plugins_in_one_restart_update_and_remove(self):
+        folder = self.addin_unit()
+        a1 = AddinTest.build_addin(self, version="1.2.0")
+        self.write_catalog(["1.2.0"], addins=[("1.2.0", a1)])
+        r = self.store("list")
+        self.assertIn("Test addin (addin)", r.stdout)
+        r = self.store("install", "test-synth", "test-addin")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.calls(), ["stop", "start"])                        # one restart for the plugin and the addin
+        self.assertNotIn("restart", open(os.path.join(self.tmp, "addin.log")).read())
+        self.assertIn("LD_PRELOAD=/usr/lib/x.so:%s/libtest.so" % folder, open(self.unit).read())
+        for f in ("libtest.so", "test.conf", "helper", "uninstall.sh", "addin-lib.sh", "addin.manifest"):
+            self.assertTrue(os.path.exists(os.path.join(folder, f)), f)
+        self.assertEqual([x[0] for x in self.state()], ["test-synth"])          # the addin's folder records its version
+        self.assertRegex(self.store("list").stdout, r"test-addin\s+1\.2\.0\s+1\.2\.0")
+        open(os.path.join(folder, "test.conf"), "w").write("mine\n")
+        a2 = AddinTest.build_addin(self, version="1.3.0")
+        self.write_catalog(["1.2.0"], addins=[("1.2.0", a1), ("1.3.0", a2)])
+        r = self.store("update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("test-addin: 1.2.0 -> 1.3.0", r.stdout)
+        self.assertIn("ADDIN_VERSION=1.3.0", open(os.path.join(folder, "addin.manifest")).read())
+        self.assertEqual(open(os.path.join(folder, "test.conf")).read(), "mine\n")   # the settings survive an update
+        settings = open(self.settings_path).read()
+        r = self.store("remove", "test-addin")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(folder))
+        self.assertEqual(open(self.unit).read(), "[Service]\nEnvironment=LD_PRELOAD=/usr/lib/x.so\n")
+        self.assertEqual(open(self.settings_path).read(), settings)                  # MPC.settings is not touched for an addin
+        self.assertFalse([n for n in os.listdir(self.tmp) if ".bak-store" in n])
+        self.assertEqual(self.calls()[-2:], ["stop", "start"])
+        self.assertNotEqual(self.store("remove", "test-addin").returncode, 0)         # not installed any more
+
+    def test_an_addin_folder_without_a_version_is_manual(self):
+        folder = self.addin_unit()
+        self.write_catalog(["1.2.0"], addins=[("1.2.0", AddinTest.build_addin(self))])
+        os.makedirs(folder)
+        open(os.path.join(folder, "addin.manifest"), "w").write("ADDIN_ID=test-addin\nADDIN_SO=libtest.so\n")
+        self.assertRegex(self.store("list").stdout, r"test-addin\s+1\.2\.0\s+manual")
+        self.assertIn("Nothing installed", self.store("update").stdout)
+
+    def test_a_quoted_addin_version_is_read_without_its_quotes(self):
+        folder = self.addin_unit()
+        self.write_catalog(["1.2.0"], addins=[("1.2.0", AddinTest.build_addin(self))])
+        os.makedirs(folder)
+        open(os.path.join(folder, "addin.manifest"), "w").write('ADDIN_ID=test-addin\nADDIN_SO=libtest.so\nADDIN_VERSION="1.2.0"   # a note\n')
+        self.assertRegex(self.store("list").stdout, r"test-addin\s+1\.2\.0\s+1\.2\.0")
+
+    def test_prune_keeps_the_newest_backups_and_touches_nothing_else(self):
+        base = self.settings_path
+        for i in range(12):   # bak-...-01 is the oldest, -12 the newest
+            f = "%s.bak-acid-20260101-%06d" % (base, i)
+            open(f, "w").write("backup %d" % i)
+            os.utime(f, (1_700_000_000 + i * 100, 1_700_000_000 + i * 100))
+        other = base + ".keep-me"
+        open(other, "w").write("not a backup")
+        before = open(base).read()
+        left = lambda: sorted(n for n in os.listdir(self.tmp) if ".bak-" in n)
+        self.assertEqual(self.store("prune", "--keep", "0").returncode, 1)               # the newest is never deleted
+        self.assertEqual(self.store("prune", "--keep", "x").returncode, 1)
+        self.assertEqual(len(left()), 12)
+        r = self.store("--dry-run", "prune", "--keep", "5")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertIn("deleting the 7 older ones", r.stdout)
+        self.assertEqual(len(left()), 12)                                                  # a dry run deletes nothing
+        r = self.store("prune", "--keep", "5")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(left(), ["MPC.settings.bak-acid-20260101-%06d" % i for i in range(7, 12)])   # the five newest
+        self.assertEqual(open(other).read(), "not a backup")
+        self.assertEqual(open(base).read(), before)
+        self.assertEqual(self.calls(), [])                                                 # MPC is never touched
+        self.assertIn("nothing to delete", self.store("prune", "--keep", "5").stdout)
+
+    def test_a_download_that_does_not_match_the_catalog_installs_nothing(self):
+        path = self.versions[0][1]
+        data = open(path, "rb").read()
+        open(path, "wb").write(data[:-1] + bytes([data[-1] ^ 1]))
+        r = self.store("install", "test-synth")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("sha256", r.stderr)
+        self.assertFalse(os.path.exists(self.synths))
+        self.assertEqual(self.calls(), [])                                       # MPC was never touched
+
+    def test_unknown_and_build_yourself_ids_are_refused(self):
+        for bad in ("nope", "byo"):
+            r = self.store("install", bad)
+            self.assertNotEqual(r.returncode, 0)
+            self.assertEqual(self.calls(), [])
+
+    def test_update_takes_a_newer_version_and_holds_back_a_major_change(self):
+        self.assertEqual(self.store("install", "test-synth").returncode, 0)
+        os.remove(self.log)
+        self.write_catalog(["1.2.0", "1.3.0"])
+        r = self.store("update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertEqual(self.state()[0][1], "1.3.0")
+        os.remove(self.log)
+        self.write_catalog(["1.2.0", "1.3.0", "2.0.0"])
+        r = self.store("update")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("major", r.stdout)
+        self.assertEqual(self.state()[0][1], "1.3.0")                            # held back
+        self.assertEqual(self.calls(), [])
+        self.assertEqual(self.store("--major", "update").returncode, 0)
+        self.assertEqual(self.state()[0][1], "2.0.0")
+
+    def test_remove_deletes_the_folder_and_entry_but_keeps_user_files(self):
+        self.assertEqual(self.store("install", "test-synth").returncode, 0)
+        rom = os.path.join(self.synths, self.SKIN, "roms", "mine.rom")
+        os.makedirs(os.path.dirname(rom))
+        open(rom, "w").write("mine")
+        os.remove(self.log)
+        r = self.store("remove", "test-synth")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertFalse(os.path.exists(os.path.join(self.synths, self.SKIN, "test_synth.so")))
+        self.assertEqual(open(rom).read(), "mine")
+        self.assertNotIn("Test Synth", self.entries())
+        self.assertIn("Other", self.entries())
+        self.assertEqual(self.state(), [])
+        self.assertEqual(self.calls(), ["stop", "start"])
+
+    def test_sync_command_uses_hash_checked_helpers(self):
+        shutil.copytree(os.path.join(self.tmp, "web"), os.path.join(self.tmp, "keep"))
+        self.assertEqual(self.store("install", "test-synth").returncode, 0)
+        os.remove(self.log)
+        gone = os.path.join(self.synths, self.SKIN, "test_synth.so")
+        os.remove(gone)                                                          # the entry now points at a missing file
+        r = self.store("sync")
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertNotIn("Test Synth", self.entries())
+        open(os.path.join(self.web, "sync.sh"), "a").write("\n# tampered\n")
+        r = self.store("sync")
+        self.assertNotEqual(r.returncode, 0)
+        self.assertIn("hash", r.stderr)
 
 
 if __name__ == "__main__":
