@@ -41,6 +41,7 @@ int main() {
     CHECK(cl.classify_filename("DeepKick_01.wav") == C_KICK, "camelCase split");
     CHECK(cl.classify_filename("open hat 909.wav") == C_OPEN_HAT, "longest window: open hat beats hat");
     CHECK(cl.lookup("shaker") == C_HAT, "shaker is hat (first writer wins)");
+    CHECK(looks_like_loop("PercLp 11.wav") && looks_like_loop("Perc Lp 02.wav") && looks_like_loop("perc_LP_03.wav") && !looks_like_loop("Help me.wav") && !looks_like_loop("Clip.wav") && looks_like_loop_dir("Clips & Loops") && !looks_like_loop_dir("Kicks"), "Lp is a loop word, Help/Clip are not; loop folders");
     CHECK(looks_like_loop("Drum Loop 90.wav") && looks_like_loop("x [120].wav") && looks_like_loop("a 128 bpm.wav") && !looks_like_loop("Kick 01.wav"), "loop heuristic");
 
     /* matchGains: attenuate-only toward the 25th percentile */
@@ -54,14 +55,14 @@ int main() {
     char tmpl[] = "/tmp/ldtestXXXXXX";
     std::string root = mkdtemp(tmpl);
     std::string wav = make_wav(1, 16, 44100, 4410);
-    const char *files[] = {"Kicks/k1.wav", "Kicks/k2.wav", "Snares/s1.wav", "Snares/s2.wav", "Hats/Closed Hats/c1.wav", "LuckyDip-0101-000000/k1.wav", "Misc/Loop 120 bpm.wav", "Fx/f1.wav", "Synth/pad1.wav", "Claps/cl1.wav", ".hidden/x.wav", "Kicks/notes.txt"};
+    const char *files[] = {"Kicks/k1.wav", "Kicks/k2.wav", "Snares/s1.wav", "Snares/s2.wav", "Hats/Closed Hats/c1.wav", "LuckyDip-0101-000000/k1.wav", "Misc/Loop 120 bpm.wav", "Clips & Loops/c1.wav", "Hats/PercLp 11.wav", "Hats/Perc Lp 02.wav", "Hats/Help me.wav", "Hats/Clip.wav", "Fx/f1.wav", "Synth/pad1.wav", "Claps/cl1.wav", ".hidden/x.wav", "Kicks/notes.txt"};
     for (size_t i = 0; i < sizeof files / sizeof files[0]; i++) wr(root + "/" + files[i], wav);
     ScanOpts so; so.roots.push_back(root);
     Library lib; ScanStats st;
     scan_library(so, cl, lib.recs, st);
     lib.rebuild();
-    CHECK(lib.recs.size() == 8, "scan found %zu samples (want 8: no loops, hidden or non-audio)", lib.recs.size());
-    CHECK(st.loops == 1, "one loop skipped");
+    CHECK(lib.recs.size() == 10, "scan found %zu samples (want 10: no loops, loop folders, hidden or non-audio)", lib.recs.size());
+    CHECK(st.loops == 4, "loops skipped: %zu (Loop 120 bpm, PercLp 11, Perc Lp 02, the Clips & Loops folder)", st.loops);
     CHECK(lib.by_cat[C_KICK].size() == 2 && lib.by_cat[C_CLOSED_HAT].size() == 1, "classified by folder");
 
     Pad pads[NPADS];
@@ -73,7 +74,7 @@ int main() {
     int filled = 0; std::string empty;
     for (int i = 0; i < NPADS; i++) { filled += pads[i].has; if (!pads[i].has) empty += " " + std::to_string(i + 1); }
     /* this library has no open hat/hat/perc/tom/conga/ride/cymbal/crash: pads 7-11 have nothing to draw from */
-    CHECK(r.unresolved == 5 && filled == 11, "%d pads filled, empty:%s (want 7-11 empty)", filled, empty.c_str());
+    CHECK(r.unresolved == 4 && filled == 12, "%d pads filled, empty:%s (want 8-11 empty)", filled, empty.c_str());
     CHECK(r.relaxed > 0, "duplicates relaxed once a pool ran dry (relaxed %d)", r.relaxed);
     Pad again[NPADS];
     assign_kit(again, lib, 1234);
@@ -103,7 +104,7 @@ int main() {
     /* XPM export */
     pads[0].locked = false;
     ExportResult xr = export_xpm(root + "/out", "Test Kit", pads);
-    CHECK(xr.ok && xr.pads == 11 && xr.gathered > 0, "export ok: %d pads, %d gathered", xr.pads, xr.gathered);
+    CHECK(xr.ok && xr.pads == 12 && xr.gathered > 0, "export ok: %d pads, %d gathered", xr.pads, xr.gathered);
     std::vector<uint8_t> xb; read_file(xr.path, xb);
     std::string x(xb.begin(), xb.end());
     CHECK(x.find("<ProgramName>Test Kit</ProgramName>") != std::string::npos, "program name");

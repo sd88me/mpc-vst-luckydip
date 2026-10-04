@@ -2,7 +2,7 @@
   "name": "Lucky Dip",
   "vendor": "sd88me",
   "uid": "LkDp",
-  "version": 1000,
+  "version": 900,
   "so": "lucky_dip.so",
   "params": "params.json",
   "defines": {

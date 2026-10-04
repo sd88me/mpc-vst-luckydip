@@ -109,7 +109,7 @@ Config load_config(const std::string &data_dir) {
 std::string roots_signature(const ScanOpts &o) {
     std::string s;
     for (size_t i = 0; i < o.roots.size(); i++) s += o.roots[i] + "|";
-    s += o.skip_loops ? "L1" : "L0";
+    s += o.skip_loops ? "L2" : "L0";   /* L2: the loop filter also catches "Lp" names and loop folders; bumping it rescans old caches */
     s += "m" + std::to_string((long long)o.max_bytes) + (o.classify_filenames ? "c1" : "c0");
     return s;
 }

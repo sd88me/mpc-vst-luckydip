@@ -79,7 +79,7 @@ Where Lucky Dip looks, where it saves, and how it behaves. Changes are saved wit
 | **RESCAN** | Rebuilds the sample list. Press it after changing the source, `SKIP LOOPS` or `MAX FILE SIZE`. The list is also saved between sessions, so startup is quick. |
 | **NO DUPLICATES** | A sample is used on only one pad of a kit. If a pad's pool runs out of unused samples it may repeat one rather than stay empty. Turn it off to allow repeats. |
 | **UNLOCK ALL** | Unlocks every pad. |
-| **SKIP LOOPS** | Leaves out files whose names look like loops ("loop", a BPM tag such as `120 bpm` or `[120]`). On by default. |
+| **SKIP LOOPS** | Leaves out files whose names look like loops ("loop", "Lp", a BPM tag such as `120 bpm` or `[120]`) and whole folders named like loops ("Clips & Loops"). On by default. |
 | **MAX FILE SIZE** | Leaves out files bigger than this (Off, 1, 2, 5, 10 or 20 MB). Keeps long recordings and loops out of a drum kit. |
 | **Library count** | How many samples were found. |
 

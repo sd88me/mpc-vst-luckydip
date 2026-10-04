@@ -173,10 +173,15 @@ inline std::string lower(const std::string &s) {
     for (size_t i = 0; i < o.size(); i++) if (o[i] >= 'A' && o[i] <= 'Z') o[i] += 32;
     return o;
 }
-/* "loop" anywhere, a bracketed number ("[120", "[ 130bpm]"), or "<n> bpm" */
+/* "loop" anywhere, "Lp" as a word ("PercLp 11", "Perc Lp 02": the Akai factory packs abbreviate loops that way), a bracketed
+ * number ("[120", "[ 130bpm]"), or "<n> bpm". Folders are checked with looks_like_loop_dir(). */
 inline bool looks_like_loop(const std::string &filename) {
     std::string n = lower(filename);
     if (n.find("loop") != std::string::npos) return true;
+    {
+        std::vector<std::string> t = Classifier::tokenize(filename);
+        for (size_t i = 0; i < t.size(); i++) if (t[i] == "lp") return true;
+    }
     for (size_t i = 0; i < n.size(); i++) {
         if (n[i] == '[') {
             size_t j = i + 1;
@@ -193,6 +198,9 @@ inline bool looks_like_loop(const std::string &filename) {
     }
     return false;
 }
+
+/* a folder of loops ("Loops", "Clips & Loops", "Drum Loops"): with Skip Loops on, the whole folder is left out */
+inline bool looks_like_loop_dir(const std::string &dirname) { return lower(dirname).find("loop") != std::string::npos; }
 
 /* ---- library index (sample_index.mjs) ------------------------------------------------------------------------- */
 
@@ -254,6 +262,7 @@ inline void scan_library(const ScanOpts &o, const Classifier &cl, std::vector<Re
                 if (lstat(full.c_str(), &s) != 0 || S_ISLNK(s.st_mode)) continue;
                 if (S_ISDIR(s.st_mode)) {
                     if (names[i].compare(0, 9, "LuckyDip-") == 0) continue;   /* our own exported kits are not source material */
+                    if (o.skip_loops && looks_like_loop_dir(names[i])) { st.loops++; continue; }
                     if ((int)it.rel.size() <= o.max_depth) {
                         Item n; n.dir = full; n.rel = it.rel; n.rel.push_back(names[i]);
                         stack.push_back(n);
