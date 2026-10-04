@@ -88,7 +88,9 @@ int main() {
     E->set_param(h, "pad1_lock", "0");
     E->set_param(h, "sel_pad", "2");
     CHECK(get(h, "sel_pad") == "2" && get(h, "sel_name") == get(h, "pad2_name"), "sel_* follows the selected pad");
+    CHECK(get(h, "sel_cat_snare_on") == "1" && get(h, "sel_cat_fx_on") == "0", "pad 2 shows its default pool (snare) lit");
     E->set_param(h, "sel_cat_fx", "1");
+    E->set_param(h, "sel_cat_snare", "0");
     CHECK(get(h, "pad2_pill") == "FX" && get(h, "sel_cat_fx_on") == "1", "per-pad pool override: %s", get(h, "pad2_pill").c_str());
     E->set_param(h, "sel_cat_synth", "1");
     CHECK(get(h, "pad2_pill") == "FX+", "two categories: %s", get(h, "pad2_pill").c_str());
@@ -147,10 +149,10 @@ int main() {
         E->set_param(h3, "pad2_lock", "1");
         E->set_param(h3, "sel_pad", "2");
         E->set_param(h3, "sel_cat_fx", "1");
-        CHECK(get(h3, "sel_cat_fx_on") == "1" && get(h3, "sel_cat_kick_on") == "0", "pad 2 selected: fx lit");
+        CHECK(get(h3, "sel_cat_fx_on") == "1" && get(h3, "sel_cat_snare_on") == "1" && get(h3, "sel_cat_kick_on") == "0", "pad 2 selected: default snare plus the added fx lit");
         uint8_t n0[3] = {0x90, 0, 100};
         E->midi(h3, n0, 3);
-        CHECK(get(h3, "sel_pad") == "1" && get(h3, "sel_cat_fx_on") == "0", "following to pad 1: its matrix is not lit");
+        CHECK(get(h3, "sel_pad") == "1" && get(h3, "sel_cat_fx_on") == "0" && get(h3, "sel_cat_kick_on") == "1", "following to pad 1: its own default (kick) is lit, fx is not");
         n0[1] = 1; E->midi(h3, n0, 3);
         CHECK(get(h3, "sel_cat_fx_on") == "1" && get(h3, "pad2_lock_on") == "1" && get(h3, "sel_lock_on") == "1", "back on pad 2: fx and lock lit");
         trig(h3, "unlock_all");

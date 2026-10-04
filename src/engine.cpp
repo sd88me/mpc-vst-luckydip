@@ -287,9 +287,18 @@ struct Inst {
             push(j);
         }
     }
+    /* the categories a pad slot draws from when nothing was chosen */
+    static uint32_t default_mask(int pad) {
+        uint32_t m = 0;
+        std::vector<int> c = pool_cats(pad, 0);
+        for (size_t k = 0; k < c.size(); k++) m |= 1u << c[k];
+        return m;
+    }
+    /* "<key>_on" mirrors: the lock bits, and each pad's EFFECTIVE pool (its choice, else its slot's default) so the
+     * category keys show what the selected pad draws from */
     void sync_mirrors_locked() {
         uint32_t lk = 0;
-        for (int i = 0; i < NPADS; i++) { if (pads[i].locked) lk |= 1u << i; pool_bits[i] = pads[i].pool; }
+        for (int i = 0; i < NPADS; i++) { if (pads[i].locked) lk |= 1u << i; pool_bits[i] = pads[i].pool ? pads[i].pool : default_mask(i); }
         lock_bits = lk;
     }
     void drop_pad_locked(int i) {
@@ -734,7 +743,11 @@ void e_set_param(void *h, const char *key, const char *val) {
     else if (!strncmp(f, "cat_", 4)) {      /* sel_cat_<name>: one category in/out of the pad's pool */
         for (int k = 0; k < NCAT; k++) if (!strcmp(f + 4, CAT_NAME[k])) {
             std::lock_guard<std::mutex> l(in->mu);
-            if (is_on(val)) in->pads[pad].pool |= 1u << k; else in->pads[pad].pool &= ~(1u << k);
+            {   /* toggle one category in the pad's effective pool; ending up on the slot's default (or empty) means "default" again */
+                uint32_t def = Inst::default_mask(pad), cur = in->pads[pad].pool ? in->pads[pad].pool : def;
+                if (is_on(val)) cur |= 1u << k; else cur &= ~(1u << k);
+                in->pads[pad].pool = (cur == def) ? 0 : cur;
+            }
             in->sync_mirrors_locked();
         }
     }

@@ -109,7 +109,7 @@ def panel(name, lt, dk, wd, ht):
     p += '<ellipse cx="%d" cy="14" rx="%d" ry="9" fill="#fff" opacity=".35"/></svg>' % (wd * .3, wd * .28)
     w(name, p)
 panel("panel_cat.svg", *CANDY[0], 860, 330)
-panel("panel_kit.svg", *CANDY[4], 340, 330)
+panel("panel_kit.svg", *CANDY[4], 360, 330)
 panel("panel_pad.svg", *CANDY[2], 1240, 292)
 panel("panel_src.svg", *CANDY[5], 1240, 170)
 panel("panel_exp.svg", *CANDY[1], 1240, 170)
@@ -140,7 +140,30 @@ def padlock(cx, cy, k, closed, col):
     o += '<circle cx="%g" cy="%g" r="%g" fill="%s" opacity=".55"/>' % (cx, by + bh * .45, k * .17, "#1d0a3d")
     return o
 
-def lit_button(name, text, w, h, lit, icon=None):
+import json
+GLYPHS = json.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "glyphs.json")))
+
+def text_path(text, size, cx, cy, fill, tracking=0.12, stroke=None):
+    """The text as outlines (Titillium Web Bold, like the plugin's other buttons), centred on cx, cy. The tracking is
+    in em, as the .button-tx style uses; stroke = (colour, width) draws the dark outline behind the fill."""
+    u = GLYPHS["upm"]
+    sc = size / u
+    track = tracking * size
+    adv = [GLYPHS["glyphs"].get(c, GLYPHS["glyphs"][" "])["adv"] * sc for c in text]
+    total = sum(adv) + track * (len(text) - 1)
+    x = cx - total / 2
+    cap = 0.69 * size                       # Titillium's cap height ~0.69 em: centre the capitals on cy
+    o = ""
+    for c, a in zip(text, adv):
+        g = GLYPHS["glyphs"].get(c, GLYPHS["glyphs"][" "])
+        if g["d"]:
+            tr = 'transform="translate(%g %g) scale(%g %g)"' % (x, cy + cap / 2, sc, -sc)
+            st = ' stroke="%s" stroke-width="%g" stroke-linejoin="round" paint-order="stroke"' % (stroke[0], stroke[1] / sc) if stroke else ""
+            o += '<path d="%s" fill="%s"%s %s/>' % (g["d"], fill, st, tr)
+        x += a + track
+    return o
+
+def lit_button(name, text, w, h, lit, icon=None, size=15, ink_on="#ffffff", stroke_on=("rgba(40,8,80,.55)", 3), ink_off="#b9a3e8"):
     for state in ("off", "on"):
         on = state == "on"
         lt, dk = lit
@@ -154,21 +177,21 @@ def lit_button(name, text, w, h, lit, icon=None):
         else:
             o += '<rect x="2" y="2" width="%d" height="%d" rx="%g" fill="#1d0a3d" stroke="#fff" stroke-opacity=".45" stroke-width="2"/>' % (w - 4, h - 4, r)
             o += '<rect x="6" y="4" width="%d" height="%g" rx="%g" fill="#fff" opacity=".07"/>' % (w - 12, h * .38, h * .19)
-        ink = "#ffffff" if on else "#b9a3e8"
+        ink = ink_on if on else ink_off
         tx = w / 2
         if icon == "lock":
-            o += padlock(h * .62, h * .45, h * .26, on, ink if on else "#8a6fc9")
-            tx = h * 1.0 + (w - h * 1.0) / 2 - 4
-        stroke = ' stroke="rgba(40,8,80,.6)" stroke-width="3" paint-order="stroke"' if on else ""
-        o += '<text x="%g" y="%g" text-anchor="middle" dominant-baseline="central" %s font-size="%g" letter-spacing="1" fill="%s"%s>%s</text>' % (tx, h / 2 + 1, FONT, min(h * .4, (w - 26) / (len(text) * .68)), ink, stroke, text)
+            o += padlock(h * .52, h * .46, h * .16, on, ink if on else "#8a6fc9")
+            tx = h * .85 + (w - h * .85) / 2 - 2
+        o += text_path(text, size, tx, h / 2, ink, stroke=stroke_on if on and stroke_on else None)
         o += '</svg>'
-        w_ = open(os.path.join(OUT, "%s_%s.svg" % (name, state)), "w"); w_.write(o); w_.close()
+        f_ = open(os.path.join(OUT, "%s_%s.svg" % (name, state)), "w"); f_.write(o); f_.close()
 
-lit_button("lock", "LOCK", 106, 44, ("#ffe066", "#ffa000"), "lock")
-lit_button("follow", "FOLLOW", 120, 44, ("#7affc8", "#10b880"))
-lit_button("nodup", "NO DUPLICATES", 176, 44, ("#7affc8", "#10b880"))
-lit_button("loops", "SKIP LOOPS", 146, 44, ("#7affc8", "#10b880"))
+# the LOCK key lights white-ice: no pad tile, PLAY or REROLL uses it, so it reads as "lit" on every tile colour
+lit_button("lock", "LOCK", 88, 38, ("#ffffff", "#c9d6ff"), "lock", size=13, ink_on="#3a0f66", stroke_on=None)
+lit_button("follow", "FOLLOW", 112, 40, ("#7affc8", "#10b880"))
+lit_button("nodup", "NO DUPLICATES", 176, 40, ("#7affc8", "#10b880"))
+lit_button("loops", "SKIP LOOPS", 146, 40, ("#7affc8", "#10b880"))
 CATLABEL = {"closed_hat": "CLOSED HAT", "open_hat": "OPEN HAT", "percussion": "PERC"}
 for key, col in CATCOL.items():
-    lit_button("cat_" + key, CATLABEL.get(key, key.upper()), 124, 40, col)
+    lit_button("cat_" + key, CATLABEL.get(key, key.upper()), 124, 38, col, size=13)
 print("art ->", OUT)

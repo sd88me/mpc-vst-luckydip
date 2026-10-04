@@ -58,6 +58,14 @@ LOCK and the category buttons are `"display":"string"` params (min 0, max 1) who
 `<key>_on` (mirrors of `pads[].locked/.pool`, updated under the lock): the wrapper polls `_on` and pushes the change, so the
 category matrix follows the selected pad and Unlock All clears the lit locks. Bench with 40 more polled params: worst block 5.2%.
 
+## Key text and the loaded .so (2026-10-04)
+An SVG used as an image can't load a page font, so the lit keys draw their text as outlines from `vst/glyphs.json`
+(`tools/gen_glyphs.py`, Titillium Web Bold, SIL OFL): the same typeface and tracking as the plugin's other buttons. The category keys
+show each pad's effective pool (its choice, else its slot's default categories); tapping a key adds/removes a category, and
+getting back to the default (or empty) means "default" again. **MPC keeps a plugin's `.so` loaded while any instance exists**:
+after a deploy, remove it from every track (or reopen the project) before judging the new build; a stale instance showed
+old text ("L:KICK") with the new skin.
+
 ## Open issues
 - ~~Async text does not refresh~~ (fixed by the wrapper poll, see above).
 - Decoding a pad is done on a worker thread, so a pad is silent for a moment after Generate.
