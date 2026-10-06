@@ -4,6 +4,7 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 MPC_VST="$(cd "${MPC_VST:-../vendor/mpc-vst}" && pwd)"   # vendored toolchain (vendor/mpc-vst/VENDORED.md)
+export SHADOW_SKIN_MPC_OS=2   # skin in the MPC OS 2.x shape (also read by 3.x)
 python3 gen_params.py; python3 gen_art.py; python3 gen_layout.py
 mkdir -p build
 cp "$MPC_VST/wrapper/engine.h" build/        # the engine ABI; build_port.sh puts vst/build on the include path
