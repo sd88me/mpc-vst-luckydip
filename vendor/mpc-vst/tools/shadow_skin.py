@@ -15,7 +15,7 @@ Layout file:
             [font="Titillium Web"] [fontfile=fonts/My.ttf (beside the layout; overrides font=)] [weight=400|600|700] [align=left|center|right] [spacing=<px>]
             [case=upper|none] [opacity=0..1] [italic=1]      (html art only; align is about cx: "left"
                                                         starts at cx, "right" ends at cx)
-    knob    cx= cy= r= label="..." key=<param>
+    knob    cx= cy= r= label="..." key=<param> [ink=<hex>] [ink_dim=<hex>]   (ink / ink_dim: this knob's name and value text colours)
     toggle  cx= cy= label="..." key=<param>
     button  cx= cy= label="..." key=<param>          (trigger)
     enum_h  cx= cy= label="..." key=<param> [options="A,B,.."] [sw=<px>] [rows=<n>]
@@ -26,14 +26,15 @@ Layout file:
                                                         label_align=center needs the browser renderer, "art": "html")
     menu    cx= cy= w= h= label="..." key=<param>      (value text; tap opens MPC's native picker -- which
                                                          opens EMPTY for a VST2, see docs/NOTES.md; use popup)
-    popup   cx= cy= w= h= label="..." key=<param> [options="A,B,.."] [cols=<n>] [groups="Title:count,.."]
+    popup   cx= cy= w= h= label="..." key=<param> [options="A,B,.."] [cols=<n>] [groups="Title:count[:headFill[:headInk[:optFill[:optInk]]]],.."] [cw=<option cell width>] [wheel=1] [accent=<hex|none>] [field=none]
                                                        (value text; tap opens a drawn option list, a pick closes it.
                                                         Needs the hidden "<param>__open" param: popup_params())
     stepper cx= cy= w= h= label="..." key=<param> [label_align=center]   (live text;
                                                         arrows = <param>_prev / <param>_next;
                                                         label_align=center needs "art": "html")
     list    x= y= w= h= cols= rows= th= gap= key=<p>   (rows = params <p>_1..<p>_N: text + tap;
-                                                        order=pads numbers the rows from the bottom, like a pad bank)
+                                                        order=pads numbers the rows from the bottom, like a pad bank;
+                                                        order=cols numbers down each column first, so it reads top to bottom)
     art     file="drawing.svg" [x= y= w= h=] [fit=]    (an SVG drawing, e.g. from studio.py from-svg, or a .png/.jpg/.webp
                                                         image, drawn into the page background: the whole plugin area, or
                                                         the box; fit=contain|cover|stretch; browser renderer only)
@@ -51,11 +52,15 @@ Layout file:
 Controls can have looks: built-in drawings or images (look=, img=, img_on=, base=, strip=, frames=, peak=, rms=;
 frames and popups take img=), per line or as top-level defaults (knob_look=moog): see tools/skin_assets.py. Looks,
 images and pictures need the browser renderer.
-    qlinks  "PAGE NAME" = key,key,...                  (optional, repeatable)
+    qlinks  "PAGE NAME" = key,key,...                  (optional, repeatable; "-" leaves a slot empty. Every 4 keys
+                                                        are one Q-Link column -- one press of the MPC One's Q-Link
+                                                        button. With qlink_bounds=column, MPC outlines that column)
 Any widget line (frames too) can end in `when=<param>:<option>` (option name or index): it is shown only
 while that option parameter is at that option (MPC's IndexedEnabling), so a tab can swap control sets per
 mode. Its baked parts (frame, title, text boxes, group labels) go into a per-mode image over the background.
 Top level: `qlinks_track = key,...` sets the Q-Links used outside page-follow mode (default: page 1's).
+`qlink_bounds=column` outlines the controls of the Q-Link column in use, as stock skins do (checked on an MPC One
+only; default: no outline).
 Top-level `style=` / `theme_<name>=RRGGBB` lines are the shadow_page.conf ones; `color=` on a
 button overrides its fill. `art_css=skin.css` restyles the browser renderer's artwork (tools/html_art.py).
 
@@ -81,6 +86,7 @@ LCD, LINE, BTN_BG, BTN_TEXT, BOX = "1a120d", "2a2823", "", "fdf3ea", "1f1f1f"
 TILE_ON = ""             # theme_tile_on: fill of a selected/sounding list tile ("" = the LCD fill, border only)
 DISPLAY_INK = "cdeb63"   # theme_display_ink: live-text colour over a dotreadout/dotstepper (see readout/stepper below)
 TD3 = False   # style=td3: frames are filled boxes, so widget crops sit on BOX, not the page bg
+QLINK_COLUMNS = False   # qlink_bounds=column: per-column Q-Link outlines (qlink_column_bounds)
 LABEL_SCALE = 1.0   # label_scale=<n>: scales knob/toggle/pill name+value live-text size and their boxes
 FRAMES = 128               # filmstrip frames emitted by (l)sstrip / (l)strip
 ROT_FRAMES = FRAMES - 1     # rotary knob FilmStrip: a rotation reads one fewer than the strip length
@@ -147,7 +153,7 @@ def parse_layout(path):
     return tabs, top
 
 
-INT_KEYS = ("x", "y", "w", "h", "cx", "cy", "r", "sw", "rows", "cols", "th", "gap")
+INT_KEYS = ("x", "y", "w", "h", "cx", "cy", "r", "sw", "sh", "rows", "cols", "th", "gap", "cw")
 
 
 def parse_widget(line):
@@ -162,8 +168,13 @@ def parse_widget(line):
             w[k] = int(w[k])
     if "options" in w:
         w["options"] = w["options"].split(",")
-    if "groups" in w:   # popup headings: "606:8,808:16" = the first 8 options under 606, the next 16 under 808
-        w["groups"] = [(t, int(n)) for t, _, n in (g.rpartition(":") for g in w["groups"].split(","))]
+    if "groups" in w:   # popup headings: "Title:count[:headFill[:headInk[:optFill[:optInk]]]],..." (all colours RRGGBB, optional)
+        gl = []
+        for g in w["groups"].split(","):
+            p = g.split(":") + [""] * 6
+            hf, hi, of, oi = (p[2] or None), (p[3] or None), (p[4] or None), (p[5] or None)
+            gl.append((p[0], int(p[1]), hf, hi, of, oi))
+        w["groups"] = gl
     return w
 
 
@@ -174,6 +185,7 @@ def apply_theme(top):
     never rasterizes with it, that's still all done by shadow_art (render_conf_preview.c)."""
     g = globals()
     g["LOOK_DEFAULTS"] = skin_assets.defaults(top)
+    g["QLINK_COLUMNS"] = False
     for line in top:
         if line.strip() == "style=td3":
             g["TD3"] = True
@@ -182,6 +194,9 @@ def apply_theme(top):
             continue
         if line.startswith("label_scale="):
             g["LABEL_SCALE"] = float(line[len("label_scale="):].strip())
+            continue
+        if line.startswith("qlink_bounds="):
+            g["QLINK_COLUMNS"] = line[len("qlink_bounds="):].strip() == "column"
             continue
         if line.startswith("scale_names="):
             g["SCALE_NAMES"] = line[len("scale_names="):].strip() not in ("", "0", "no", "off")
@@ -221,6 +236,32 @@ def NAME_H(): return round(28 * LABEL_SCALE) if SCALE_NAMES else 20
 def TOG_W(): return round(170 * LABEL_SCALE) if SCALE_NAMES else 120
 
 
+TEXT_WEIGHTS = {"regular": "Regular", "400": "Regular", "semibold": "SemiBold", "600": "SemiBold", "bold": "Bold",
+                "700": "Bold", "light": "Light", "300": "Light"}
+TEXT_JUST = {"left": "left verticallyCentred", "center": "horizontallyCentred verticallyCentred",
+             "right": "right verticallyCentred"}
+
+
+def live_text(w, size, colour, just):
+    """A readout's or list row's live text style, overridable per line: tsize= (px), tcolor= (hex), tweight=
+    (regular|semibold|bold|light or 400/600/700/300), talign= (left|center|right), tfont= (Titillium Web or Roboto,
+    the families MPC renders). -> (size, colour, justification, style, font, signature for the component name)."""
+    size = float(w.get("tsize", size))
+    colour = w.get("tcolor", colour).lstrip("#")
+    style = TEXT_WEIGHTS.get(str(w.get("tweight", "semibold")).lower(), "SemiBold")
+    just = TEXT_JUST.get(w.get("talign"), just)
+    font = w.get("tfont", "Titillium Web")
+    sig = "" if not any(k in w for k in ("tsize", "tcolor", "tweight", "talign", "tfont")) else \
+        "_%s" % slug("%g_%s_%s_%s_%s" % (size, colour, style, just.split()[0], font))
+    return size, colour, just, style, font, sig
+
+
+def card_art(img, x, y, tw, th, base_dir):
+    """A list row drawn from the port's own picture (img=/img_on=) instead of the renderer's tile."""
+    path = os.path.abspath(os.path.join(base_dir, img))
+    return ("svg|%s|%d|%d|%d|%d" if path.lower().endswith(".svg") else "image|%s|%d|%d|%d|%d|stretch") % (path, x, y, tw, th)
+
+
 def toggle_rect(w, base_dir="."):
     """A toggle's image box (shadow coords): the stock pill, or its look's size."""
     tw, th = skin_assets.toggle_size(w, look_of(w, base_dir))
@@ -242,8 +283,11 @@ def shade(hexcol, f):
 
 
 def list_keys(w):
-    """tile i's param: rows top-down, or bottom-up like a pad bank (order=pads: pad 1 is bottom left)"""
+    """tile i's param: rows top-down, or bottom-up like a pad bank (order=pads: pad 1 is bottom left), or down each column
+    first (order=cols: 1..rows in the left column, then the next column), so a list reads and steps top to bottom"""
     n, cols = w["cols"] * w["rows"], w["cols"]
+    if w.get("order") == "cols":
+        return ["%s_%d" % (w["key"], (i % cols) * w["rows"] + i // cols + 1) for i in range(n)]
     if w.get("order") == "pads":
         return ["%s_%d" % (w["key"], (w["rows"] - 1 - i // cols) * cols + i % cols + 1) for i in range(n)]
     return ["%s_%d" % (w["key"], i + 1) for i in range(n)]
@@ -284,12 +328,12 @@ def popup_layout(w):
     field, else above, else from the top of the plugin area. Plain lists use columns when the options don't fit one;
     with groups=, every group gets a heading and its own column(s) of up to POP_GROUP_ROWS options."""
     n = len(w["options"])
-    fx, fy, fw, fh = w["cx"] - w["w"] // 2, w["cy"] - w["h"] // 2, w["w"], w["h"]
+    fx, fy, fw, fh = w["cx"] - w["w"] // 2, w["cy"] - w["h"] // 2, w.get("cw") or w["w"], w["h"]   # cw=: option cell width
     below, above = Y_OFF + H - (fy + fh + 4), fy - 4 - Y_OFF
     groups = w.get("groups")
     if groups:
-        rows = min(POP_GROUP_ROWS, max(c for _, c in groups))
-        cols = sum(-(-c // rows) for _, c in groups)
+        rows = min(POP_GROUP_ROWS, max(g[1] for g in groups))
+        cols = sum(-(-g[1] // rows) for g in groups)
         ph = (rows + 1) * (POP_ROW + POP_GAP) - POP_GAP + 2 * POP_PAD
     else:
         for cols in ([w["cols"]] if w.get("cols") else range(1, n + 1)):
@@ -310,7 +354,7 @@ def popup_layout(w):
         opts = [(px + POP_PAD + (o // rows) * (fw + POP_GAP), py + POP_PAD + (o % rows) * step, fw, POP_ROW) for o in range(n)]
         return (px, py, pw, ph), opts, []
     opts, heads, col = [], [], 0
-    for title, count in groups:
+    for title, count, *_colours in groups:
         gcols = -(-count // rows)
         heads.append(((px + POP_PAD + col * (fw + POP_GAP), py + POP_PAD, gcols * fw + (gcols - 1) * POP_GAP, POP_ROW), title))
         for o in range(count):
@@ -325,9 +369,39 @@ def popup_panel(w):
     return panel, opts
 
 
+def mix_hex(a, b, t):
+    """a blended toward b by t (0..1), both RRGGBB."""
+    ca, cb = [int(a[i:i + 2], 16) for i in (0, 2, 4)], [int(b[i:i + 2], 16) for i in (0, 2, 4)]
+    return "%02x%02x%02x" % tuple(round(x + (y - x) * t) for x, y in zip(ca, cb))
+
+
 def popup_heading_cmds(w):
-    """Art commands for a grouped popup's headings (none for a plain list): accent text on the list's own fill."""
-    return ["seg|%d|%d|%d|%d|%s|%s|%s" % (x, y, hw, hh, LCD, ACCENT, title) for (x, y, hw, hh), title in popup_layout(w)[2]]
+    """Art commands for a grouped popup's headings (none for a plain list): the group's heading fill and text colours;
+    without them the heading is accent text on the list's own fill (a lone colour fills it, dark text)."""
+    out = []
+    for ((x, y, hw, hh), title), g in zip(popup_layout(w)[2], w.get("groups") or []):
+        if g[2] or g[3]:
+            fill, ink = g[2] or LCD, g[3] or ("101214" if g[2] else ACCENT)
+        else:
+            fill, ink = LCD, ACCENT
+        out.append("seg|%d|%d|%d|%d|%s|%s|%s" % (x, y, hw, hh, fill, ink, title))
+    return out
+
+
+def popup_option_fills(w):
+    """The fill of each option while not selected: the group's option colour, a faint tint of its heading colour, or the list's own."""
+    fills = []
+    for g in w.get("groups") or []:
+        fills += [g[4] or (mix_hex(LCD, g[2], 0.22) if g[2] else LCD)] * g[1]
+    return fills or [LCD] * len(w["options"])
+
+
+def popup_option_inks(w):
+    """The text colour of each option while not selected."""
+    inks = []
+    for g in w.get("groups") or []:
+        inks += [g[5] or INK] * g[1]
+    return inks or [INK] * len(w["options"])
 
 
 def qlink_for_slot(slot):
@@ -342,7 +416,7 @@ def seg_rects(w):
         sw, sh, gap = w.get("sw") or 135, 30, 2   # respect the layout's sw= (like enum_h), else 135
         y0 = w["cy"] - (n * (sh + gap)) // 2
         return [(w["cx"] - sw // 2, y0 + i * (sh + gap), sw, sh) for i in range(n)]
-    sw, sh, gap = w.get("sw") or 117, 33, 2
+    sw, sh, gap = w.get("sw") or 117, w.get("sh") or 33, 2   # sw=/sh=: segment size
     rows = w.get("rows", 1)
     per = -(-n // rows)
     out = []
@@ -414,6 +488,8 @@ def baked_cmds(w, title_font=None, base_dir="."):
             cmds.append("frameblank|%d|%d|%d|%d" % (w["x"], w["y"], w["w"], w["h"]))
         else:
             cmds.append("frame|%d|%d|%d|%d|%s" % (w["x"], w["y"], w["w"], w["h"], w.get("title") or "-"))
+    elif w["kind"] == "readout" and str(w.get("box", "1")) == "0":
+        pass   # box=0: live text only, over the page's own artwork
     elif w["kind"] in ("readout", "stepper", "menu", "popup"):
         op = "readout" if w["kind"] in ("menu", "popup") else w["kind"]
         if w["kind"] in ("readout", "stepper") and w.get("style") == "dotmatrix":
@@ -421,10 +497,12 @@ def baked_cmds(w, title_font=None, base_dir="."):
         cmd = "%s|%d|%d|%d|%d|%s" % (op, w["cx"], w["cy"], w["w"], w["h"], w.get("label") or "-")
         if w.get("label_align") == "center":   # only sent when non-default: keeps the wire
             cmd += "|center"                   # format backward-compatible with shadow_art.c
-        cmds.append(cmd)
+        if not (w["kind"] == "popup" and w.get("field") == "none"):   # field=none: no drawn box (the artwork supplies it)
+            cmds.append(cmd)
     elif w["kind"] == "list":
         for (x, y, tw, th) in list_tiles(w):
-            cmds.append("tile|%d|%d|%d|%d|%s|%s|0" % (x, y, tw, th, LCD, LINE))
+            cmds.append(card_art(w["img"], x, y, tw, th, base_dir) if w.get("img")
+                        else "tile|%d|%d|%d|%d|%s|%s|0" % (x, y, tw, th, LCD, LINE))
     elif w["kind"] == "text":
         size = float(w.get("size", 1.5))
         color = w.get("color", INK)
@@ -498,8 +576,8 @@ def _sub(ctype, data, bnd, name=""):
             "handle remapping": {"version": 1, "map": []}, "bounds": bnd}
 
 
-def _action(on, handler, extra=""):
-    return {"version": 2, "onAction": on, "handler": handler, "handleName": "" if handler == "Show Overlay" else "Data",
+def _action(on, handler, extra="", handle="Data"):
+    return {"version": 2, "onAction": on, "handler": handler, "handleName": "" if handler == "Show Overlay" else handle,
             "additionalData": extra, "handle remapping": {"version": 1, "map": []}}
 
 
@@ -508,7 +586,7 @@ def _local(key, actions, children):
     return {"key": key, "value": {"version": 4, "actions": actions,
                                   "backgroundData": {"version": 1, "focussed": clear, "unfocussed": clear},
                                   "ignoreMousePresses": False, "disableCoarseDataWheel": False, "repeats": 1,
-                                  "hideQLinkBounds": True, "componentsData": children}}
+                                  "hideQLinkBounds": not QLINK_COLUMNS, "componentsData": children}}
 
 
 def _focus(w, h):
@@ -517,10 +595,11 @@ def _focus(w, h):
                 _bounds(0, 0, w, h, visible="WhenFocussed"), "Focus")
 
 
-def _value_label(x, y, w, h, size, colour, just="horizontallyCentred verticallyCentred", handle="Data"):
-    return _sub("Label", {"version": 1, "textStyle": {"version": 1, "font": {"version": 1, "name": "Titillium Web",
-                                                                         "style": "SemiBold", "height": size},
-                                                   "colour": "ff" + colour, "justification": just, "case": "Original"},
+def _value_label(x, y, w, h, size, colour, just="horizontallyCentred verticallyCentred", handle="Data", style="SemiBold",
+                 font="Titillium Web"):
+    return _sub("Label", {"version": 1, "textStyle": {"version": 1, "font": {"version": 1, "name": font,
+                                                                         "style": style, "height": size},
+                                                   "colour": "00000000" if colour == "none" else "ff" + colour, "justification": just, "case": "Original"},
                           "type": "Value", "handleName": handle}, _bounds(x, y, w, h), "Value")
 
 
@@ -644,8 +723,8 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                     w["options"] = [str(o) for o in p.get("options") or []]
             if w["kind"].startswith("enum") and not w.get("options"):
                 w["options"] = [str(o).upper() for o in p.get("options") or []]   # default: the parameter's own
-            if w.get("groups") and sum(c for _, c in w["groups"]) != len(w["options"]):
-                raise SystemExit("layout: %s groups cover %d options, it has %d" % (k, sum(c for _, c in w["groups"]), len(w["options"])))
+            if w.get("groups") and sum(g[1] for g in w["groups"]) != len(w["options"]):
+                raise SystemExit("layout: %s groups cover %d options, it has %d" % (k, sum(g[1] for g in w["groups"]), len(w["options"])))
             if (w["kind"].startswith("enum") or w["kind"] == "popup") and len(w["options"]) != len(p.get("options") or []):
                 raise SystemExit("layout: %s has %d options, parameter has %d" % (k, len(w["options"]), len(p.get("options") or [])))
             controls.append(k)
@@ -717,13 +796,18 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
             if kind == "knob":
                 r = w["r"]
                 s, cw = 2 * r + 10, max(round(130 * LABEL_SCALE) if SCALE_NAMES else 130, 2 * r + 10)   # value label width; LFO knobs sit 138 px apart
+                if s * FRAMES > 16384:   # MPC garbles taller filmstrips (the knob drifts as it turns): docs/NOTES.md
+                    sys.stderr.write("warning: knob r=%d (%s): its %d px filmstrip is over MPC's 16384 px image limit; "
+                                     "use r <= %d\n" % (r, w["key"], s * FRAMES, (16384 // FRAMES - 10) // 2))
                 name_h = NAME_H() if SCALE_NAMES else round(20 * LABEL_SCALE)
                 name_y = s // 2 + r + 2
                 value_y = name_y + name_h + 2
                 value_h = round(26 * LABEL_SCALE)
                 ch = value_y + value_h + 6
                 radii.add((r, lid))
-                key = "shKnob%d%s%s" % (r, sfx, ("_ls%g" % LABEL_SCALE) if LABEL_SCALE != 1.0 else "")
+                ink, dim = w.get("ink") or INK, w.get("ink_dim") or INK_DIM   # per-control label colours (ink=, ink_dim=)
+                key = "shKnob%d%s%s%s" % (r, sfx, ("_ls%g" % LABEL_SCALE) if LABEL_SCALE != 1.0 else "",
+                                          "_c%s%s" % (ink, dim) if (ink, dim) != (INK, INK_DIM) else "")
                 defs.setdefault(key, _local(key, [_action("Mouse Down", "Q-Link"),
                                                   _action("Double Click", "Show Overlay", "knob overlay"),
                                                   _action("Enter Pressed", "Show Overlay", "knob overlay")], [
@@ -734,7 +818,7 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                     _name_label(0, name_y, cw, name_h, NAME_FONT("knob"), INK),
                     _sub("Label", {"version": 1, "textStyle": {"version": 1, "font": {"version": 1, "name": "Titillium Web",
                                                                                      "style": "SemiBold", "height": 22.0 * LABEL_SCALE},
-                                                               "colour": "ff" + INK_DIM,
+                                                               "colour": "ff" + dim,
                                                                "justification": "horizontallyCentred verticallyCentred",
                                                                "case": "Upper Case"},
                                    "type": "Value", "handleName": "Data"},
@@ -853,10 +937,22 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                 # group on the enum; the wrapper clears "open" when an option is picked.
                 oi = index[w["key"] + OPEN_SUFFIX]
                 x, y, rw, rh = w["cx"] - w["w"] // 2, w["cy"] - w["h"] // 2, w["w"], w["h"]
-                key = "shPopField_%dx%d" % (rw, rh)
-                defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
-                                            [_focus(rw, rh), _value_label(8, 0, rw - 44, rh, 26.0, ACCENT, handle="Text")]))
-                kids.append(_placed(key, name, oi, x, y, rw, rh, extra={"Text": i}))
+                acc = w.get("accent") or ACCENT   # per-control field text colour (accent=)
+                csfx = "_c" + acc if acc != ACCENT else ""
+                if w.get("wheel") in ("1", "true", "yes"):
+                    # wheel=1 (EXPERIMENTAL, unverified on a device): the field's Data handle is the enum itself, so the
+                    # data wheel / a Q-Link step through the options while it has focus; a tap toggles the list through
+                    # a second, named handle ("Open"), as stock skins name action handles.
+                    key = "shPopFieldW_%dx%d%s" % (rw, rh, csfx)
+                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch", handle="Open"),
+                                                      _action("Enter Pressed", "Toggle Switch", handle="Open")],
+                                                [_focus(rw, rh), _value_label(8, 0, rw - 44, rh, 26.0, acc, handle="Text")]))
+                    kids.append(_placed(key, name, i, x, y, rw, rh, extra={"Text": i, "Open": oi}))
+                else:
+                    key = "shPopField_%dx%d%s" % (rw, rh, csfx)
+                    defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
+                                                [_focus(rw, rh), _value_label(8, 0, rw - 44, rh, 26.0, acc, handle="Text")]))
+                    kids.append(_placed(key, name, oi, x, y, rw, rh, extra={"Text": i}))
                 (px, py, pw, ph), orects = popup_panel(w)
                 shown = "IndexedEnabling/1/2/Parameter %d" % oi
                 panel = "sh_pop_%d_%s" % (t, w["key"])
@@ -868,9 +964,10 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                                                               "image": panel + ".png"}, _bounds(0, 0, pw, ph), "Image")])
                 parts = [_placed(pkey, "%s list" % name, oi, px, py, pw, ph, focus="No")]
                 n = len(w["options"])
+                fills, inks = popup_option_fills(w), popup_option_inks(w)
                 for o, (ox, oy, ow, oh) in enumerate(orects):
                     img = "sh_popopt_%d_%s_%d" % (t, w["key"], o)
-                    for state, fill, ink in (("on", SEG_ON, SEG_ON_TX), ("off", LCD, INK)):
+                    for state, fill, ink in (("on", SEG_ON, SEG_ON_TX), ("off", fills[o], inks[o])):
                         script += ["clear|" + LCD, "seg|%d|%d|%d|%d|%s|%s|%s" % (ox, oy, ow, oh, fill, ink, w["options"][o]),
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), ox, oy, ow, oh)]
                     okey = "shPopOpt_%d_%s_%d" % (t, w["key"], o)
@@ -884,8 +981,13 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
             elif kind == "readout":
                 x, y, rw, rh = w["cx"] - w["w"] // 2, w["cy"] - w["h"] // 2, w["w"], w["h"]
                 dot = w.get("style") == "dotmatrix"
-                key = "shReadout_%s%dx%d" % ("dot_" if dot else "", rw, rh)
-                defs.setdefault(key, _local(key, [], [_value_label(8, 0, rw - 16, rh, 26.0, DISPLAY_INK if dot else ACCENT)]))
+                size, colour, just, style, font, sig = live_text(w, 26.0, DISPLAY_INK if dot else ACCENT,
+                                                                 "left verticallyCentred")
+                pad = int(w.get("tpad", 8))
+                key = "shReadout_%s%dx%d%s_p%d" % ("dot_" if dot else "", rw, rh, sig, pad) if sig or pad != 8 else \
+                    "shReadout_%s%dx%d" % ("dot_" if dot else "", rw, rh)
+                defs.setdefault(key, _local(key, [], [_value_label(pad, 0, rw - 2 * pad, rh, size, colour, just,
+                                                                   style=style, font=font)]))
                 kids.append(_placed(key, name, i, x, y, rw, rh, focus="No"))
             elif kind == "stepper":
                 x0, y0 = w["cx"] - w["w"] // 2, w["cy"] - w["h"] // 2
@@ -912,15 +1014,23 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                     kids.append(_placed(akey, "%s %s" % (name, side), index[side_key], ax, ay, aw, ah, focus="No"))
             elif kind == "list":
                 for slot, ((x, y, tw, th), sk) in enumerate(zip(list_tiles(w), list_keys(w))):
-                    img = "sh_tile_%dx%d" % (tw, th)
+                    own = w.get("img")   # img=/img_on=: the port's own card pictures (off, selected)
+                    img = "sh_tile_%dx%d" % (tw, th) if not own else "sh_card_%s_%dx%d" % (slug(w["key"]), tw, th)
                     for state, border in (("on", 3), ("off", 0)):
-                        script += ["clear|" + under(), "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, (TILE_ON or LCD) if border else LCD, SEG_ON if border else LINE, border),
+                        drawn = card_art(w.get("img_on", own) if border else own, x, y, tw, th, base_dir) if own else \
+                            "tile|%d|%d|%d|%d|%s|%s|%d" % (x, y, tw, th, (TILE_ON or LCD) if border else LCD, SEG_ON if border else LINE, border)
+                        script += ["clear|" + under(), drawn,
                                    "crop|%s|%d|%d|%d|%d" % (art("%s_%s" % (img, state)), x, y, tw, th)]
-                    key = "shRow_%dx%d" % (tw, th)
+                    size, colour, just, style, font, sig = live_text(w, 24.0, ACCENT, "left verticallyCentred")
+                    # tx=/ty=/ttw=/tth= place the row's text inside the card (default: the whole row, 12 px in)
+                    lx, ly = int(w.get("tx", 12)), int(w.get("ty", 0))
+                    lw, lh = int(w.get("ttw", tw - lx - 12)), int(w.get("tth", th - ly))
+                    key = "shRow_%dx%d%s" % (tw, th, sig + ("_%d_%d_%d_%d" % (lx, ly, lw, lh) if (lx, ly, lw, lh) != (12, 0, tw - 24, th) else "")
+                                            + ("_" + slug(w["key"]) if own else ""))
                     # the Value label lies over the button and takes the touch, so the row itself toggles on touch
                     defs.setdefault(key, _local(key, [_action("Mouse Down", "Toggle Switch"), _action("Enter Pressed", "Toggle Switch")],
                                                 [_focus(tw, th), _button(img + "_on.png", img + "_off.png", 1, 1, tw, th),
-                                                 _value_label(12, 0, tw - 24, th, 24.0, ACCENT, "left verticallyCentred")]))
+                                                 _value_label(lx, ly, lw, lh, size, colour, just, style=style, font=font)]))
                     kids.append(_placed(key, "%s %d" % (name, slot + 1), index[sk], x, y, tw, th, focus="Yes" if slot == 0 else "No"))
             else:  # enum_h / enum_v: radio group, one image button per option
                 n = len(w["options"])
@@ -953,12 +1063,15 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                 raise SystemExit("layout: qlinks %r has %d keys (max 16)" % (title, len(keys)))
             ql = {"Q-Link %d" % (q + 1): -1 for q in range(16)}
             for s, k in enumerate(keys):
+                if k == "-":
+                    continue
                 if k not in index:
                     raise SystemExit("layout: qlinks key %r is not a parameter" % k)
                 ql["Q-Link %d" % qlink_for_slot(s)] = index[k]
             comp = "%s|%s" % (tab["name"], title)
             pages.append({"version": 3, "tabName": title, "fnKeyIndex": t, "fnKeySubIndex": sp,
-                          "qlinkBoundsData": ["0 0 0 0"], "componentName": comp,
+                          "qlinkBoundsData": qlink_column_bounds(tab, keys, base_dir) if QLINK_COLUMNS else ["0 0 0 0"],
+                          "componentName": comp,
                           "initialSize": "0 0 %d %d" % (W, H), "scale": 1.0})
             qmap.append({"Tab": t + 1, "SubTab": sp + 1, "Bank Direction": "Column", "Q-Links": ql})
             defs[comp] = {"key": comp, "value": {
@@ -966,7 +1079,7 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
                 "backgroundData": {"version": 1, "focussed": {"version": 1, "colour": "ff" + PLATE, "image": ""},
                                    "unfocussed": {"version": 1, "colour": "ff" + PLATE, "image": ""}},
                 "ignoreMousePresses": False, "disableCoarseDataWheel": False, "repeats": 1,
-                "hideQLinkBounds": True, "componentsData": kids}}
+                "hideQLinkBounds": not QLINK_COLUMNS, "componentsData": kids}}
 
     for img, sw_, sh_, vert, lid in sorted(sliders):
         if lid:
@@ -1004,9 +1117,9 @@ def build(layout_path, params, skin_dir, art_bin, png_from_ppm):
             tb = dr.textbbox((0, 0), w["label"], font=group_font)
             tw, th = tb[2] - tb[0], tb[3] - tb[1]
             dr.text((gx - ox - tw / 2 - tb[0], gy - oy - th / 2 - tb[1]), w["label"], font=group_font, fill="#" + color)
-        for w in pops:   # the field's "opens a list" marker
+        for w in [q for q in pops if q.get("accent") != "none" and q.get("field") != "none"]:   # the field's "opens a list" marker (accent=none: invisible field)
             x, y = w["cx"] + w["w"] // 2 - 22 - ox, w["cy"] - oy
-            dr.polygon([(x - 8, y - 4), (x + 8, y - 4), (x, y + 5)], fill="#" + ACCENT)
+            dr.polygon([(x - 8, y - 4), (x + 8, y - 4), (x, y + 5)], fill="#" + (w.get("accent") or ACCENT))
         im.save(path)
     if label_overlays:
         from PIL import Image, ImageDraw, ImageFont
@@ -1037,8 +1150,19 @@ def square_strip(path, w, h):
     out.save(path)
 
 
-def qlink_bounds(tab, keys):
-    """Rectangle around the controls a page's Q-Links drive (plugin coords)."""
+def qlink_column_bounds(tab, keys, base_dir="."):
+    """One rectangle per Q-Link column, as stock skins do (e.g. AIR OPx-4): with "Bank Direction": "Column", slots
+    1-4 are column 1, 5-8 column 2, ... (qlink_for_slot), and MPC outlines the column the Q-Links currently drive --
+    on an MPC One each press of the Q-Link button moves to the next one. A single rectangle around all 16 left MPC
+    outlining the wrong area. An empty column in the middle gets an empty rectangle; trailing ones are left out."""
+    rects = [qlink_bounds(tab, [k for k in keys[c * 4:c * 4 + 4] if k != "-"], base_dir) for c in range(4)]
+    while rects and rects[-1] is None:
+        rects.pop()
+    return [r or "0 0 0 0" for r in rects]
+
+
+def qlink_bounds(tab, keys, base_dir="."):
+    """Rectangle around the controls in keys (plugin coords), or None if none of them is on the page."""
     xs, ys = [], []
     for w in tab["widgets"]:
         if w["kind"] == "list":
@@ -1061,8 +1185,12 @@ def qlink_bounds(tab, keys):
             r = w["r"]
             xs += [w["cx"] - r - 10, w["cx"] + r + 10]
             ys += [w["cy"] - r - 8, w["cy"] + r + 40]
-        elif w["kind"] in ("button", "meter"):
-            continue   # a shared trigger (e.g. GENERATE) would stretch the box across frames; meters take no Q-Link
+        elif w["kind"] == "button":   # boxes are per Q-Link column, so a trigger only stretches its own column's box
+            x, y, bw, bh = button_rect(w, base_dir)
+            xs += [x, x + bw]
+            ys += [y, y + bh]
+        elif w["kind"] == "meter":
+            continue   # meters take no Q-Link
         elif w["kind"] == "toggle":
             xs += [w["cx"] - TOG_W() // 2, w["cx"] + TOG_W() // 2]
             ys += [w["cy"] - 18, w["cy"] + 18 + NAME_H()]
@@ -1071,7 +1199,7 @@ def qlink_bounds(tab, keys):
                 xs += [x, x + sw]
                 ys += [y - 40, y + sh]
     if not xs:
-        return "0 0 %d %d" % (W, H)
+        return None
     x0, y0 = max(0, min(xs) - 6), max(0, min(ys) - Y_OFF - 6)
     return "%d %d %d %d" % (x0, y0, min(W, max(xs) + 6) - x0, min(H, max(ys) - Y_OFF + 6) - y0)
 
@@ -1097,9 +1225,65 @@ def program_qlinks(layout_path, params, qmap):
     return dict(qmap[0]["Q-Links"])
 
 
-def write_skin(outdir, vendor, name, layout_path, params, art_bin):
-    """Build the whole skin folder <outdir>/<vendor> - VST - <name>/ from a layout. Needs Pillow."""
+def to_mpc2x(tui):
+    """Rewrite a generated TUI.json (the MPC OS 3.x format) in the shape MPC OS 2.15.1's own skins use, in place.
+
+    Seen in 2.15.1's stock skins (AIR Amp Sim, Decimator; docs/NOTES.md): the tab is `version 1` with its page inline as
+    `componentDefinition`, definitions are `version 2` without `repeats`/`hideQLinkBounds`, `Knob` data is `version 1`
+    (no `invert`/`dragOrientation`), `Button` data is `version 1` (no `gestureBehaviour`) and actions are `version 1` (no
+    `handle remapping`, which is always empty in Akai's own skins). Checked role by role against 110 stock 2.15.1 skins:
+    every role in the six released ports' skins then has a version 2.15.1 itself uses. Experimental: touch behaviour on
+    2.x not yet confirmed on a device."""
+    pd = tui["pageData"]
+    cdefs = pd["componentDefinitions"]
+    defs = {d["key"]: d for d in cdefs["localComponentDefinitions"]}
+    used = set()
+    for t in pd["tabs"]:
+        if t.get("version") == 3:
+            key = t.pop("componentName")
+            if key not in defs:
+                raise SystemExit("to_mpc2x: tab %r points at missing definition %r" % (t.get("tabName"), key))
+            t.pop("initialSize", None)
+            t.pop("scale", None)
+            t["componentDefinition"] = defs[key]["value"]
+            t["version"] = 1
+            used.add(key)
+    cdefs["localComponentDefinitions"] = [d for d in cdefs["localComponentDefinitions"] if d["key"] not in used]
+
+    def fix(o):
+        if isinstance(o, dict):
+            cd = o.get("componentData")
+            if isinstance(cd, dict):
+                dd = cd.get("data", {})
+                if cd.get("type") == "Knob" and dd.get("version") == 5:
+                    dd["version"] = 1
+                    dd.pop("invert", None)
+                    dd.pop("dragOrientation", None)
+                elif cd.get("type") == "Button" and dd.get("version") == 2:
+                    dd["version"] = 1
+                    dd.pop("gestureBehaviour", None)
+            if o.get("version") == 2 and "onAction" in o and "handler" in o:   # an action: 2.x only has version 1
+                o["version"] = 1
+                o.pop("handle remapping", None)
+            if o.get("version") == 4 and "componentsData" in o:     # a page or widget definition
+                o["version"] = 2
+                o.pop("repeats", None)
+                o.pop("hideQLinkBounds", None)
+            for x in list(o.values()):
+                fix(x)
+        elif isinstance(o, list):
+            for x in o:
+                fix(x)
+    fix(pd)
+    return tui
+
+
+def write_skin(outdir, vendor, name, layout_path, params, art_bin, mpc_os=None):
+    """Build the whole skin folder <outdir>/<vendor> - VST - <name>/ from a layout. Needs Pillow.
+    mpc_os=2 (or SHADOW_SKIN_MPC_OS=2) writes TUI.json in the older MPC OS 2.x shape (to_mpc2x); default is 3.x."""
     import json
+    if mpc_os is None:
+        mpc_os = int(os.environ.get("SHADOW_SKIN_MPC_OS", "3"))
     from PIL import Image
     d = os.path.join(outdir, "%s - VST - %s" % (vendor, name))
     skin = os.path.join(d, "Plugin Skins")
@@ -1112,6 +1296,8 @@ def write_skin(outdir, vendor, name, layout_path, params, art_bin):
                                  "localComponentDefinitions": comps},
         "info": {"version": 1, "type": "CompleteDescription"},
         "tabs": tabs}}
+    if mpc_os == 2:
+        to_mpc2x(tui)
     qlinks = {"version": 4, "info": {"version": 1, "type": "CompleteDescription"},
               "Screen Mode Q-Links": {"version": 4, "map": qmap},
               "Program Mode Q-Links": program_qlinks(layout_path, params, qmap)}

@@ -31,6 +31,45 @@ func TestDialReadsTheDeviceAndRefusesBadInput(t *testing.T) {
 	}
 }
 
+// The device's glibc is read from its libc: run it for the version (glibc 2.34 and later), or take it from the file name (older glibc);
+// not finding one leaves it empty, so the app warns about nothing it cannot know.
+func TestDialReadsTheDevicesGlibc(t *testing.T) {
+	cases := []struct{ name, body, want string }{
+		{"libc.so.6", "#!/bin/sh\necho 'GNU C Library (GNU libc) stable release version 2.39.'\n", "2.39"},
+		{"libc.so.6", "#!/bin/sh\necho 'GNU C Library (Buildroot 2021.02.12) stable release version 2.33.'\n", "2.33"},
+		{"libc.so.6", "not runnable and no version in its name", ""},
+	}
+	for _, c := range cases {
+		fd := newFakeDevice(t)
+		if err := os.WriteFile(filepath.Join(fd.dir, c.name), []byte(c.body), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		d, err := Dial("127.0.0.1", "secret", fd.cfg())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if d.Info.Libc != c.want {
+			t.Errorf("libc %q: got %q, want %q", c.body[:20], d.Info.Libc, c.want)
+		}
+		d.Close()
+	}
+	// older glibc: the version is in the file name
+	fd := newFakeDevice(t)
+	cfg := fd.cfg()
+	cfg.LibcPaths = filepath.Join(fd.dir, "libc-*.so")
+	if err := os.WriteFile(filepath.Join(fd.dir, "libc-2.32.so"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	d, err := Dial("127.0.0.1", "secret", cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	if d.Info.Libc != "2.32" {
+		t.Errorf("from the file name: got %q, want 2.32", d.Info.Libc)
+	}
+}
+
 func TestDialWithoutPasswordOrKey(t *testing.T) {
 	t.Setenv("HOME", t.TempDir()) // no ~/.ssh keys
 	if _, err := Dial("127.0.0.1", "", newFakeDevice(t).cfg()); err == nil || !strings.Contains(err.Error(), "enter the device's password") {

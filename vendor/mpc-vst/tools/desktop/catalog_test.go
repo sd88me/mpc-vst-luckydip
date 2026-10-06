@@ -35,6 +35,35 @@ func TestParseCatalogOffersOnlyTheNewestStableDownloadableVersion(t *testing.T) 
 	}
 }
 
+// The catalog's os_compat, os_compat_why and max_glibc of the version the app offers reach the row; a catalog without them leaves them empty.
+func TestParseCatalogCarriesTheMPCOSFields(t *testing.T) {
+	h := strings.Repeat("a", 64)
+	raw := `{"schema":1,"plugins":[
+ {"id":"two","name":"Two","author":"me","kind":"instrument","summary":"s","distribution":"release","latest":"1.1.0","versions":[
+   {"version":"1.1.0","size":1,"sha256":"` + h + `","url":"https://example.com/two.zip","channel":"stable","yanked":false,"os_compat":["2.x","3.x"],"max_glibc":"2.29","manifest":{"skin":"x"}}]},
+ {"id":"three","name":"Three","author":"me","kind":"instrument","summary":"s","distribution":"release","latest":"1.0.0","versions":[
+   {"version":"1.0.0","size":1,"sha256":"` + h + `","url":"https://example.com/three.zip","channel":"stable","yanked":false,"os_compat":["3.x"],"os_compat_why":["TUI:tabs[] version 3 (2.15.1 uses 1)"],"max_glibc":"2.34","manifest":{"skin":"x"}}]},
+ {"id":"old","name":"Old","author":"me","kind":"instrument","summary":"s","distribution":"release","latest":"1.0.0","versions":[
+   {"version":"1.0.0","size":1,"sha256":"` + h + `","url":"https://example.com/old.zip","channel":"stable","yanked":false,"manifest":{"skin":"x"}}]}]}`
+	got, err := parseCatalog([]byte(raw))
+	if err != nil {
+		t.Fatal(err)
+	}
+	by := map[string]CatPlugin{}
+	for _, c := range got {
+		by[c.ID] = c
+	}
+	if g := strings.Join(by["two"].OSCompat, ","); g != "2.x,3.x" || by["two"].MaxGlibc != "2.29" || len(by["two"].OSWhy) != 0 {
+		t.Errorf("two: %+v", by["two"])
+	}
+	if g := strings.Join(by["three"].OSCompat, ","); g != "3.x" || by["three"].MaxGlibc != "2.34" || len(by["three"].OSWhy) != 1 {
+		t.Errorf("three: %+v", by["three"])
+	}
+	if o := by["old"]; len(o.OSCompat) != 0 || o.MaxGlibc != "" {
+		t.Errorf("a catalog without the fields must leave them empty: %+v", o)
+	}
+}
+
 func serveZip(t *testing.T, body []byte) CatPlugin {
 	t.Helper()
 	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { w.Write(body) }))

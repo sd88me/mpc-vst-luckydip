@@ -26,10 +26,12 @@ type Config struct {
 	SettingsGlob string // where MPC.settings is
 	MountsFile   string // the list of mounts, "/proc/mounts"
 	AddinsDir    string // where addins live, one folder each: "/data/mpc-addins"
+	LibcPaths    string // where to look for the device's libc, shell words (globs allowed), to read its glibc version
 }
 
 func defaultConfig() Config {
-	return Config{Port: "22", User: "root", RemoteTmp: "/tmp", SynthsDir: "/sdcard/Synths", RootGlobs: "/sdcard/Synths /media/*/Synths", MountsFile: "/proc/mounts", SettingsGlob: "/media/az01-internal/Settings/*/MPC.settings", AddinsDir: "/data/mpc-addins"}
+	return Config{Port: "22", User: "root", RemoteTmp: "/tmp", SynthsDir: "/sdcard/Synths", RootGlobs: "/sdcard/Synths /media/*/Synths", MountsFile: "/proc/mounts", SettingsGlob: "/media/az01-internal/Settings/*/MPC.settings", AddinsDir: "/data/mpc-addins",
+		LibcPaths: "/lib/libc.so.6 /lib/arm-linux-gnueabihf/libc.so.6 /usr/lib/libc.so.6 /lib/libc-*.so /usr/lib/libc-*.so"}
 }
 
 type DeviceInfo struct {
@@ -42,6 +44,7 @@ type DeviceInfo struct {
 	TmpFreeKB   int64                        `json:"tmpFreeKB"`
 	Tar         bool                         `json:"tar"`
 	Systemctl   bool                         `json:"systemctl"`
+	Libc        string                       `json:"libc"`      // the device's glibc ("2.33"), empty when it cannot be told: MPC OS 2.x has about 2.32, 3.x and the Force 2.39
 	Roots       []Root                       `json:"roots"`     // the places plugins can live: the internal drive first, then cards and drives
 	Installed   []string                     `json:"installed"` // names of the plugin folders found in any of them
 	Store       map[string]string            `json:"store"`     // plugin id -> version recorded by this app or mpc-store.sh, in the internal drive
@@ -258,6 +261,14 @@ echo "settings=$(ls %s 2>/dev/null | head -n 1)"
 echo "tmpfree=$(df -k %s 2>/dev/null | awk 'NR==2 {print $4}')"
 command -v tar >/dev/null 2>&1 && echo tar=1
 command -v systemctl >/dev/null 2>&1 && echo systemctl=1
+libc=""
+for f in %s; do   # glibc 2.34 and later print their version when the library is run; older ones keep it in the file name (libc-2.33.so)
+  [ -e "$f" ] || continue
+  v=""; if [ -x "$f" ]; then v=$("$f" 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1); fi
+  [ -n "$v" ] || v=$(basename "$f" | sed -n 's/^libc-\([0-9][0-9]*\.[0-9][0-9]*\)\.so$/\1/p')
+  if [ -n "$v" ]; then libc=$v; break; fi
+done
+echo "libc=$libc"
 for r in %s; do
   [ -d "$r" ] && [ -w "$r" ] || continue
   rid=$(stat -L -c '%%d:%%i' "$r" 2>/dev/null)
@@ -283,7 +294,7 @@ for d in %s/*/; do
   u=0; [ -f "${d}uninstall.sh" ] && u=1
   printf 'addin=%%s\t%%s\t%%s\t%%s\n' "$(basename "$d")" "$(mval ADDIN_VERSION "$f")" "$u" "$(mval ADDIN_NAME "$f")"
 done
-true`, shQuote(d.cfg.SynthsDir), d.cfg.SettingsGlob, shQuote(d.cfg.RemoteTmp), d.cfg.RootGlobs, shQuote(d.cfg.MountsFile), d.cfg.SettingsGlob, shQuote(d.cfg.AddinsDir))
+true`, shQuote(d.cfg.SynthsDir), d.cfg.SettingsGlob, shQuote(d.cfg.RemoteTmp), d.cfg.LibcPaths, d.cfg.RootGlobs, shQuote(d.cfg.MountsFile), d.cfg.SettingsGlob, shQuote(d.cfg.AddinsDir))
 	info := DeviceInfo{Host: host, Fingerprint: fp, Synths: d.cfg.SynthsDir, Installed: []string{}, Store: map[string]string{}, Stores: map[string]map[string]string{}}
 	var lines []string
 	var mu sync.Mutex
@@ -313,6 +324,8 @@ true`, shQuote(d.cfg.SynthsDir), d.cfg.SettingsGlob, shQuote(d.cfg.RemoteTmp), d
 			info.Tar = true
 		case "systemctl":
 			info.Systemctl = true
+		case "libc":
+			info.Libc = strings.TrimSpace(v)
 		case "loc":
 			locs = append(locs, strings.TrimRight(v, "/"))
 		case "root":

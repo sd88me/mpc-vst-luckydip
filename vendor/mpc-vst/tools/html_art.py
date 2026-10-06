@@ -151,6 +151,27 @@ def hexc(s):
     return "#" + s.strip().lstrip("#")
 
 
+def scope_svg(src, prefix):
+    """An SVG inlined into the page shares one document with every other one, so its ids (gradients, clip paths,
+    filters) and the class names its <style> defines would collide with another image's. Prefix both."""
+    ids = set(re.findall(r'\sid="([^"]+)"', src))
+    if ids:
+        ref = lambda m: m.group(1) + (prefix + "-" + m.group(2) if m.group(2) in ids else m.group(2)) + m.group(3)
+        src = re.sub(r'(\sid=")([^"]+)(")', ref, src)
+        src = re.sub(r'(url\(\s*[\'"]?#)([^)\'"\s]+)([\'"]?\s*\))', ref, src)
+        src = re.sub(r'(href="#)([^"]+)(")', ref, src)
+    if "<style" in src:
+        classes = set(c for v in re.findall(r'\sclass="([^"]*)"', src) for c in v.split())
+        if classes:
+            src = re.sub(r'(\sclass=")([^"]*)(")',
+                         lambda m: m.group(1) + " ".join(prefix + "-" + c for c in m.group(2).split()) + m.group(3), src)
+            src = re.sub(r"(<style[^>]*>)(.*?)(</style>)", lambda m: m.group(1) + re.sub(
+                r"\.(-?[_a-zA-Z][\w-]*)(?![\w-])",
+                lambda c: "." + (prefix + "-" + c.group(1) if c.group(1) in classes else c.group(1)), m.group(2))
+                + m.group(3), src, flags=re.S)
+    return src
+
+
 class Art:
     def __init__(self, href=None):
         self.href = href         # the editor's path -> URL; None: the renderer inlines each image once (page defs)
@@ -516,6 +537,16 @@ class Art:
         out = []
         for path, iid in self.images.items():
             iw, ih = skin_assets.image_size(path)
+            if path.lower().endswith(".svg"):
+                # inlined, not a data: URI: an SVG drawn as an image can't use the page's fonts, so its text would fall
+                # back to a serif. Inline it keeps Titillium Web (and any @font-face the stylesheets add).
+                src = scope_svg(re.sub(r"<\?xml[^>]*\?>|<!DOCTYPE[^>]*>", "", open(path, encoding="utf-8").read()).strip(), iid)
+                m = re.match(r"<svg\b", src)
+                if m:
+                    out.append('<svg id="%s" width="%d" height="%d"%s' % (iid, iw, ih, re.sub(r'\s(id|width|height)="[^"]*"', "",
+                                                                                             src[4:src.index(">") + 1]))
+                               + src[src.index(">") + 1:])
+                    continue
             mime = skin_assets.MIME.get(os.path.splitext(path)[1].lower(), "image/png")
             with open(path, "rb") as f:
                 data = base64.b64encode(f.read()).decode()

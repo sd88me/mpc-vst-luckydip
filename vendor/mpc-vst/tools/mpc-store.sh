@@ -115,14 +115,43 @@ confirm() {   # confirm <question>
     printf "%s [y/N] " "$1"; read -r ok; case "$ok" in y|Y|yes) return 0 ;; *) echo "cancelled"; exit 1 ;; esac
 }
 
+# The device's glibc ("2.33"), or nothing when it cannot be told: MPC OS 2.x has about 2.32, MPC OS 3.x and the Force 2.39. Newer glibc prints its
+# version when its library is run; older glibc keeps it in the file name (libc-2.33.so). MPC_STORE_LIBC lists other places to look (tests).
+libc_version() {
+    for f in ${MPC_STORE_LIBC:-/lib/libc.so.6 /lib/arm-linux-gnueabihf/libc.so.6 /usr/lib/libc.so.6 /lib/libc-*.so /usr/lib/libc-*.so}; do
+        [ -e "$f" ] || continue
+        v=""
+        if [ -x "$f" ]; then v=$("$f" 2>/dev/null | sed -n 's/.*version \([0-9][0-9]*\.[0-9][0-9]*\).*/\1/p' | head -n 1); fi
+        [ -n "$v" ] || v=$(basename "$f" | sed -n 's/^libc-\([0-9][0-9]*\.[0-9][0-9]*\)\.so$/\1/p')
+        if [ -n "$v" ]; then echo "$v"; return 0; fi
+    done
+    return 0
+}
+vgt() {   # vgt 2.34 2.33 succeeds when the first version is newer than the second
+    awk -v a="$1" -v b="$2" 'BEGIN { n = split(a, x, "."); m = split(b, y, "."); for (i = 1; i <= (n > m ? n : m); i++) { if (x[i] + 0 > y[i] + 0) exit 0; if (x[i] + 0 < y[i] + 0) exit 1 } exit 1 }'
+}
+# os_warnings <todo file>: say what will not work on this device; never stops the install (the catalog's os_compat and max_glibc columns)
+os_warnings() {
+    libc=$(libc_version); [ -n "$libc" ] || return 0
+    while IFS=$TAB read -r kind id ver latest k name skin uid compat size sha url ud defer os mg; do
+        [ "$k" != addin ] || continue
+        if [ -n "${mg:-}" ] && [ "$mg" != "-" ] && vgt "$mg" "$libc"; then
+            echo "WARNING: $name $ver needs glibc $mg but this device has $libc: MPC will list it but it will not load."
+        elif [ "${os:--}" != "-" ] && ! echo ",$os," | grep -q ',2\.x,' && vgt 2.34 "$libc"; then
+            echo "NOTE: $name $ver is made for MPC OS 3.x. This device looks like MPC OS 2.x (glibc $libc), so its touchscreen page may stay empty; it still works from the Q-Links."
+        fi
+    done < "$1"
+}
+
 do_list() {
     printf '%-18s %-9s %-10s %s\n' "ID" "LATEST" "INSTALLED" "NAME"
-    awk -F'\t' '$1 == "plugin" && $4 == 1 { print $2 "\t" $3 "\t" $6 "\t" $7 "\t" $5 }' "$W/catalog.tsv" | while IFS=$TAB read -r id ver name skin kind; do
+    awk -F'\t' '$1 == "plugin" && $4 == 1 { print $2 "\t" $3 "\t" $6 "\t" $7 "\t" $5 "\t" $15 }' "$W/catalog.tsv" | while IFS=$TAB read -r id ver name skin kind os; do
         inst=$(installed_version "$id" || true)
         where="$SYNTHS/$skin"; [ "$kind" != addin ] || where="$ADDINS/$id"
         if [ -z "$inst" ]; then if [ -d "$where" ]; then inst="manual"; else inst="-"; fi; fi
         [ "$kind" != addin ] || name="$name (addin)"
         mark=""; if [ "$inst" != "-" ] && [ "$inst" != "manual" ] && [ "$inst" != "$ver" ]; then mark="  (update available)"; fi
+        if [ "$os" = "3.x" ]; then mark="$mark  [MPC OS 3.x only]"; fi
         printf '%-18s %-9s %-10s %s%s\n' "$id" "$ver" "$inst" "$name" "$mark"
     done
 }
@@ -145,6 +174,7 @@ do_install_rows() {
     done
     [ $n -gt 0 ] || { echo "Nothing to install."; return 0; }
     echo "Verified. About to install:"; awk -F'\t' '{ print "  " $2 " " $3 " (" $6 ($5 == "addin" ? ", an addin" : "") ")" }' "$W/todo"
+    os_warnings "$W/todo"
     [ $DRY = 1 ] && { echo "Dry run: nothing changed."; return 0; }
     confirm "MPC will be stopped and restarted. Save your project first. Continue?"
     ok=0; failed=0

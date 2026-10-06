@@ -27,6 +27,7 @@ import zipfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from catalog_check import max_glibc  # noqa: E402
+import skin_compat  # noqa: E402
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -187,6 +188,18 @@ def walk(top):
             yield os.path.join(d, f)
 
 
+def _json_or_none(path):
+    try:
+        return json.load(open(path))
+    except (OSError, ValueError):
+        return None
+
+
+# which MPC OS generations the skin and library work on: ["2.x", "3.x"] or ["3.x"] (tools/skin_compat.py, docs/OS2_SKINS.md)
+os_compat, os_why = skin_compat.os_compat(max_glibc(a.so), _json_or_none(os.path.join(pdir, "Plugin Skins", "TUI.json")),
+                                          _json_or_none(os.path.join(pdir, "Plugin Skins", "Q-Links.json")))
+print("MPC OS compatibility: %s%s" % (" and ".join(os_compat), "" if "2.x" in os_compat else " only (not 2.x: %s)" % "; ".join(os_why[:2])))
+
 plugin_id = a.id or re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 if not re.fullmatch(r"[a-z0-9]+(-[a-z0-9]+)*", plugin_id):
     raise SystemExit("--id must be lowercase letters, digits and hyphens")
@@ -206,6 +219,7 @@ manifest = {
     "user_data": a.user_data,
     "arch": elf_machine(a.so),
     "max_glibc": max_glibc(a.so),
+    "os_compat": os_compat,
     "param_compat": int(a.version.split(".")[0]),
     "about": a.about,
     "requires": a.requires,
@@ -214,6 +228,8 @@ manifest = {
     "cpu": {"p99_pct": bench["p99_pct"], "max_pct": bench["max_pct"], "verdict": bench["verdict"]} if bench else None,
 }
 open(os.path.join(root, "mpc-plugin.json"), "w").write(json.dumps(manifest, indent=2) + "\n")
+# a copy travels with the installed folder, so a device-side manager can tell which version is installed
+open(os.path.join(pdir, "mpc-plugin.json"), "w").write(json.dumps(manifest, indent=2) + "\n")
 
 # MODES: the executable files and symlinks inside the plugin folder (tab separated: "x<TAB>path", "l<TAB>path<TAB>target").
 # A zip unpacked on Windows, or copied file by file, loses exec bits and turns symlinks into small text files; install.sh

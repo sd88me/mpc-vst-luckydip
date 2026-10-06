@@ -72,6 +72,9 @@ a { color: inherit; }
 .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 320px), 1fr)); gap: 16px; }
 .card { background: var(--panel); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px;
   display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+.card .shot { display: block; margin: -18px -18px 0; aspect-ratio: 2 / 1; overflow: hidden; background: var(--lcd-bg);
+  border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0; }
+.card .shot img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .card header { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .card h2 { font: 700 26px/1.05 var(--display); text-transform: uppercase; letter-spacing: .02em; margin: 0; }
 .by { color: var(--muted); font-size: 13px; margin-top: 2px; }
@@ -81,6 +84,7 @@ a { color: inherit; }
 .tags { display: flex; gap: 6px; flex-wrap: wrap; }
 .tag { font: 600 11px/1 var(--display); letter-spacing: .1em; text-transform: uppercase; color: var(--muted);
   border: 1px solid var(--line); border-radius: 3px; padding: 6px 8px; }
+.tag.ok { color: var(--fg); border-color: var(--fg); }
 .tag.warn { color: var(--amber-ink); border-color: var(--amber); background: color-mix(in srgb, var(--amber) 14%, var(--panel)); }
 .meta { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font: 400 12px/1.5 var(--text); color: var(--muted);
   border-top: 1px solid var(--line); padding-top: 12px; margin: 0; }

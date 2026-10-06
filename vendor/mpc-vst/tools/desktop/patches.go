@@ -28,6 +28,7 @@ var patchClient = &http.Client{Timeout: time.Minute}
 
 var sha256Re = regexp.MustCompile(`^[0-9a-f]{64}$`)
 var md5Re = regexp.MustCompile(`^[0-9a-f]{32}$`)
+var reasonRe = regexp.MustCompile(`^[a-z0-9]+(-[a-z0-9]+)*$`)
 
 // Patch is one entry of patches.json, published next to catalog.json.
 type Patch struct {
@@ -145,13 +146,14 @@ func FetchPatchScript(p Patch) ([]byte, error) {
 
 // PatchState is what a patch script's `status` says about the device.
 type PatchState struct {
-	State     string `json:"state"` // stock | patched | old-patch | unsupported
+	State     string `json:"state"` // stock | patched | old-patch | partial | unsupported
 	Supported bool   `json:"supported"`
 	Backup    bool   `json:"backup"`
-	Checksum  string `json:"checksum,omitempty"` // md5 of the device's MPC program, when the script says (v5 and later)
+	Checksum  string `json:"checksum,omitempty"` // md5 of the device's MPC program, when the script says (the drum-pad patch, v5 and later)
+	Reason    string `json:"reason,omitempty"`   // a short token saying why a patch cannot apply (see reasonText)
 }
 
-// parseStateLine reads the last "STATE state=.. supported=0|1 backup=0|1 [checksum=<md5>]" line of a script's output.
+// parseStateLine reads the last "STATE state=.. supported=0|1 backup=0|1 [checksum=<md5>] [reason=<token>]" line of a script's output.
 func parseStateLine(lines []string) (PatchState, bool) {
 	for i := len(lines) - 1; i >= 0; i-- {
 		l := strings.TrimSpace(lines[i])
@@ -165,13 +167,16 @@ func parseStateLine(lines []string) (PatchState, bool) {
 			}
 		}
 		switch kv["state"] {
-		case "stock", "patched", "old-patch", "unsupported":
+		case "stock", "patched", "old-patch", "partial", "unsupported":
 		default:
 			return PatchState{}, false
 		}
 		st := PatchState{State: kv["state"], Supported: kv["supported"] == "1", Backup: kv["backup"] == "1"}
 		if md5Re.MatchString(kv["checksum"]) {
 			st.Checksum = kv["checksum"]
+		}
+		if len(kv["reason"]) <= 40 && reasonRe.MatchString(kv["reason"]) {
+			st.Reason = kv["reason"]
 		}
 		return st, true
 	}
@@ -226,8 +231,15 @@ func PatchRows(dev *Device, patches []Patch, fetch func(Patch) ([]byte, error)) 
 				var st PatchState
 				if st, err = dev.PatchStatus(script); err == nil {
 					r.State, r.Supported, r.HasBackup = st.State, st.Supported, st.Backup
-					if st.State == "unsupported" {
+					switch st.State {
+					case "unsupported":
 						r.Detail = unsupportedDetail(p, st)
+					case "partial":
+						if t, ok := reasonText[st.Reason]; ok {
+							r.Detail = t
+						} else {
+							r.Detail = "Installed, but not active right now: the drive may not be mounted, or its mount was removed. Check the patch's guide."
+						}
 					}
 				}
 			}
@@ -240,13 +252,34 @@ func PatchRows(dev *Device, patches []Patch, fetch func(Patch) ([]byte, error)) 
 	return rows
 }
 
+// reasonText: what a patch script's reason= token means on the page. An unknown token falls back to the general sentence.
+var reasonText = map[string]string{
+	"not-root":        "The script must run as root on the device.",
+	"arch":            "This patch is for another kind of device.",
+	"tools":           "A tool the patch needs is missing on this device.",
+	"other-version":   "Another version of this patch is already installed: remove it with its own uninstaller first.",
+	"other-install":   "The original ForceHD VST Exec is installed: remove it with its own uninstaller first.",
+	"bad-drive":       "The drive path is not one the patch can use.",
+	"no-drive":        "That drive is not mounted.",
+	"not-needed":      "That drive already allows running programs, so the patch is not needed.",
+	"no-noexec-drive": "No drive is mounted that blocks running programs (is the drive plugged in, and does it already work?).",
+	"unknown-layout":  "This device has neither the Hakai launcher nor an acvs or inmusic-mpc service this patch can hook.",
+	"hand-install":    "A copy of this remap is already installed by hand. Remove it first; the patch's guide says how.",
+	"not-loaded":      "Installed, but the running MPC has not loaded it. Restart MPC.",
+	"not-running":     "Installed. MPC is not running, so it is not in effect until MPC starts.",
+	"incomplete":      "Installed, but a file is missing. The patch's guide says how to remove it and install it again.",
+}
+
 // unsupportedDetail says why the script would not touch the device, so a bare "not supported" is never all the page shows.
 func unsupportedDetail(p Patch, st PatchState) string {
 	var b strings.Builder
+	if t, ok := reasonText[st.Reason]; ok {
+		return t
+	}
 	if st.Checksum != "" {
 		b.WriteString("This device's MPC program has the checksum " + st.Checksum + ", which is not a build this patch knows")
 	} else {
-		b.WriteString("The patch script does not recognise this device's MPC program")
+		b.WriteString("The patch script does not recognise this device")
 	}
 	if p.Supports.OS != "" {
 		b.WriteString(" (it supports " + p.Supports.OS)
@@ -256,7 +289,7 @@ func unsupportedDetail(p Patch, st PatchState) string {
 		b.WriteString(")")
 	}
 	b.WriteString(".")
-	if st.Backup {
+	if st.Backup && st.Checksum != "" {
 		b.WriteString(" A backup from an earlier install is on the device: its guide explains how to restore the stock program from it with the script's uninstall.")
 	}
 	return b.String()

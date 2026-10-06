@@ -69,13 +69,13 @@ class Base(unittest.TestCase):
                 zout.writestr(i, data[i.filename])
         return out
 
-    def build(self, version="1.2.0", machine=40, glibc=b"GLIBC_2.30", extra=(), elf_class=1):
+    def build(self, version="1.2.0", machine=40, glibc=b"GLIBC_2.30", extra=(), elf_class=1, tui="{}"):
         t = self.tmp
         fake_so(os.path.join(t, "test_synth.so"), machine, glibc, elf_class)
         skin = os.path.join(t, "Acme - VST - Test Synth")
         os.makedirs(os.path.join(skin, "Plugin Skins"), exist_ok=True)
         open(os.path.join(skin, "version.xml"), "w").write("<v/>")
-        open(os.path.join(skin, "Plugin Skins", "TUI.json"), "w").write("{}")
+        open(os.path.join(skin, "Plugin Skins", "TUI.json"), "w").write(tui)
         open(os.path.join(t, "entry.xml"), "w").write(ENTRY)
         out = os.path.join(t, "dist")
         subprocess.check_call([sys.executable, os.path.join(HERE, "release.py"), "--so", os.path.join(t, "test_synth.so"),
@@ -93,6 +93,72 @@ class Base(unittest.TestCase):
                     data = fn(data)
                 zout.writestr(i, data)
         return out
+
+
+class OsCompatTest(Base):
+    """Which MPC OS generations a version works on, worked out from its skin and library (docs/OS2_SKINS.md)."""
+
+    def check(self, z):
+        return catalog_check.check(z, catalog=True, expect_id="test-synth", expect_repo="acme/test-synth")
+
+    def test_a_skin_the_checker_cannot_read_is_3x_only(self):
+        z = self.build()                                   # the fake skin is "{}"
+        errors, warnings, rec = self.check(z)
+        self.assertEqual(errors, [])
+        self.assertEqual(rec["os_compat"], ["3.x"])
+        self.assertEqual(rec["os_compat_why"], ["TUI.json has no pageData"])
+        self.assertEqual(rec["manifest"]["os_compat"], ["3.x"])
+
+    def test_a_2x_shaped_skin_is_2x_and_3x(self):
+        import json
+        from test_skin_compat import tui_2x
+        z = self.build(tui=json.dumps(tui_2x()))
+        errors, warnings, rec = self.check(z)
+        self.assertEqual(errors, [])
+        self.assertEqual(rec["os_compat"], ["2.x", "3.x"])
+        self.assertNotIn("os_compat_why", rec)
+        self.assertEqual(rec["manifest"]["os_compat"], ["2.x", "3.x"])
+
+    def test_a_release_made_before_the_field_is_still_classified(self):
+        import json
+        from test_skin_compat import tui_2x
+
+        def drop(d):
+            m = json.loads(d)
+            m.pop("os_compat")
+            return (json.dumps(m, indent=2) + "\n").encode()
+        z = self.resum(self.build(tui=json.dumps(tui_2x())), "mpc-plugin.json", drop)
+        errors, warnings, rec = self.check(z)
+        self.assertEqual(errors, [])
+        self.assertEqual(rec["os_compat"], ["2.x", "3.x"])
+
+    def claim(self, value):
+        import json
+
+        def setv(d):
+            m = json.loads(d)
+            m["os_compat"] = value
+            return (json.dumps(m, indent=2) + "\n").encode()
+        return setv
+
+    def test_claiming_2x_for_a_skin_that_is_not_is_an_error(self):
+        z = self.resum(self.build(), "mpc-plugin.json", self.claim(["2.x", "3.x"]))
+        errors, warnings, rec = self.check(z)
+        self.assertTrue([e for e in errors if "claims 2.x" in e], errors)
+
+    def test_a_developer_can_narrow_a_2x_skin_to_3x(self):
+        import json
+        from test_skin_compat import tui_2x
+        z = self.resum(self.build(tui=json.dumps(tui_2x())), "mpc-plugin.json", self.claim(["3.x"]))
+        errors, warnings, rec = self.check(z)
+        self.assertEqual(errors, [])
+        self.assertEqual(rec["os_compat"], ["3.x"])
+
+    def test_a_bad_claim_is_an_error(self):
+        for bad in (["2.x"], ["4.x"], "2.x", []):
+            z = self.resum(self.build(), "mpc-plugin.json", self.claim(bad))
+            errors, warnings, rec = self.check(z)
+            self.assertTrue([e for e in errors if "os_compat must be" in e], (bad, errors))
 
 
 class CatalogTest(Base):
@@ -186,6 +252,23 @@ class CatalogTest(Base):
         self.assertTrue(any("armv7" in x for x in e) and any("not a 32-bit ARM library" in x for x in e), e)
         e, _, _ = catalog_check.check(self.build(glibc=b"GLIBC_2.38"))
         self.assertTrue(any("GLIBC" in x for x in e))
+
+    def test_glibc_above_2_32_is_listed_as_3x_only_up_to_2_36(self):
+        import json
+        from test_skin_compat import tui_2x
+        skin = json.dumps(tui_2x())
+        for glibc, errors, gens in ((b"GLIBC_2.30", False, ["2.x", "3.x"]), (b"GLIBC_2.32", False, ["2.x", "3.x"]),
+                                    (b"GLIBC_2.33", False, ["3.x"]), (b"GLIBC_2.34", False, ["3.x"]), (b"GLIBC_2.36", False, ["3.x"]),
+                                    (b"GLIBC_2.37", True, None)):
+            e, w, rec = catalog_check.check(self.build(glibc=glibc, tui=skin), catalog=True)
+            self.assertEqual(bool(e), errors, (glibc, e))
+            if errors:
+                self.assertTrue(any("limit is 2.36" in x for x in e), e)
+                continue
+            self.assertEqual(rec["os_compat"], gens, glibc)
+            self.assertEqual(any("listed as MPC OS 3.x only" in x for x in w), gens == ["3.x"], (glibc, w))
+            if gens == ["3.x"]:
+                self.assertTrue(any("needs glibc" in x for x in rec["os_compat_why"]), rec["os_compat_why"])
 
     def test_tampered_file_fails_checksum(self):
         z = self.tamper(self.build(), "portable/Acme - VST - Test Synth/test_synth.so", lambda d: d + b"x")
@@ -409,6 +492,7 @@ class AddinTest(Base):
         row = catalog_site.tsv(cat, []).splitlines()[1].split("\t")
         self.assertEqual(row[:8], ["plugin", "test-addin", "1.2.0", "1", "addin", "Test addin", "-", "-"])
         self.assertEqual((row[12], row[13]), ("test.conf", "1"))
+        self.assertEqual(row[14:], ["-", row[15]])   # an addin has no skin, so no os_compat; max_glibc is whatever its library needs
         # an addin release listed under an instrument entry (or the reverse) is refused
         cat, problems = catalog_build.build([dict(entry, kind="instrument")], gh, os.path.join(self.tmp, "cache"), set())
         self.assertEqual(cat["plugins"][0]["versions"], [])
@@ -437,8 +521,8 @@ class BuildTest(Base):
     ENTRY = {"id": "test-synth", "name": "Test Synth", "author": "A", "repo": "acme/test-synth", "kind": "instrument",
              "license": "MIT", "summary": "s"}
 
-    def rel(self, tag, aid, pre=False, name="x-mpc-armv7.zip"):
-        return {"tag_name": tag, "prerelease": pre, "draft": False, "published_at": "2026-09-29T00:00:00Z", "body": "notes",
+    def rel(self, tag, aid, pre=False, name="x-mpc-armv7.zip", at="2026-09-29T00:00:00Z"):
+        return {"tag_name": tag, "prerelease": pre, "draft": False, "published_at": at, "body": "notes",
                 "assets": [{"id": aid, "name": name, "browser_download_url": "https://x/" + name, "download_count": 3}]}
 
     def test_build_keeps_good_versions_and_reports_bad(self):
@@ -455,6 +539,50 @@ class BuildTest(Base):
         self.assertEqual(p["downloads"], 9)   # all time: every published zip, including the yanked 1.0.0 and the invalid 1.2.0
         self.assertEqual(sorted((x["tag"] for x in problems)), ["v1.2.0", "v1.3.0-b"])
 
+    def test_a_newest_release_without_the_pattern_asset_is_reported_unless_the_repo_is_shared(self):
+        good = self.build("1.0.0")
+        entry = dict(self.ENTRY, asset_pattern="Synth-*-mpc-armv7.zip")
+        renamed = self.rel("v1.1.0", 2, name="synth-fixed.zip", at="2026-09-30T00:00:00Z")   # the author swapped the asset
+        old = self.rel("v1.0.0", 1, name="Synth-1.0.0-mpc-armv7.zip")
+        gh = FakeGitHub({"acme/test-synth": [renamed, old]}, {1: good})
+        cat, problems = catalog_build.build([entry], gh, os.path.join(self.tmp, "c"), set())
+        self.assertEqual([(x["tag"], x["error"]) for x in problems],
+                         [("v1.1.0", "expected one asset matching Synth-*-mpc-armv7.zip, found 0")])
+        # an older release from before the pattern existed stays silent
+        gh = FakeGitHub({"acme/test-synth": [self.rel("v1.1.0", 1, name="Synth-1.1.0-mpc-armv7.zip", at="2026-09-30T00:00:00Z"),
+                                              self.rel("v1.0.0", 2, name="legacy.zip")]}, {1: self.build("1.1.0")})
+        self.assertEqual(catalog_build.build([entry], gh, os.path.join(self.tmp, "c2"), set())[1], [])
+        # a repo shared by several entries: another plugin's release is not this one's problem
+        other = dict(self.ENTRY, id="other-synth", asset_pattern="Other-*-mpc-armv7.zip")
+        gh = FakeGitHub({"acme/test-synth": [renamed, old]}, {1: good})
+        self.assertEqual(catalog_build.build([entry, other], gh, os.path.join(self.tmp, "c3"), set())[1], [])
+
+    def test_each_version_carries_its_os_compat(self):
+        import json
+        from test_skin_compat import tui_2x
+        old, new = self.build("1.0.0"), self.build("1.1.0", tui=json.dumps(tui_2x()))
+        gh = FakeGitHub({"acme/test-synth": [self.rel("v1.1.0", 2), self.rel("v1.0.0", 1)]}, {1: old, 2: new})
+        cat, problems = catalog_build.build([self.ENTRY], gh, os.path.join(self.tmp, "c"), set())
+        self.assertEqual(problems, [])
+        by = {v["version"]: v for v in cat["plugins"][0]["versions"]}
+        self.assertEqual(by["1.0.0"]["os_compat"], ["3.x"])
+        self.assertEqual(by["1.0.0"]["os_compat_why"], ["TUI.json has no pageData"])
+        self.assertEqual(by["1.1.0"]["os_compat"], ["2.x", "3.x"])
+        self.assertNotIn("os_compat_why", by["1.1.0"])
+
+    def test_a_failure_with_a_newer_passing_release_is_superseded(self):
+        bad = lambda v: self.tamper(self.build(v), "portable/Acme - VST - Test Synth/test_synth.so", lambda d: d + b"x")
+        gh = FakeGitHub({"acme/test-synth": [self.rel("v1.3.0", 4, at="2026-10-03T00:00:00Z"),
+                                              self.rel("v1.2.0", 3, at="2026-10-02T12:00:00Z"),
+                                              self.rel("v1.1.0", 2, at="2026-10-02T09:00:00Z"),
+                                              self.rel("v1.0.0", 1, at="2026-10-01T00:00:00Z")]},
+                        {1: bad("1.0.0"), 2: bad("1.1.0"), 3: self.build("1.2.0"), 4: bad("1.3.0")})
+        _, problems = catalog_build.build([self.ENTRY], gh, os.path.join(self.tmp, "c"), set())
+        self.assertEqual({x["tag"]: x["superseded"] for x in problems}, {"v1.0.0": True, "v1.1.0": True, "v1.3.0": False})
+        # the passing release is yanked: nothing it would supersede counts as fixed
+        _, problems = catalog_build.build([self.ENTRY], gh, os.path.join(self.tmp, "c"), {"test-synth@1.2.0"})
+        self.assertFalse(any(x["superseded"] for x in problems))
+
     def test_tested_json_attaches_to_matching_version(self):
         gh = FakeGitHub({"acme/test-synth": [self.rel("v1.0.0", 1)]}, {1: self.build("1.0.0")})
         gh.tested = lambda repo: [{"version": "v1.0.0", "device": "MPC Live II", "firmware": "3.6", "date": "2026-09-01"},
@@ -468,6 +596,7 @@ class BuildTest(Base):
         self.assertEqual(cat["plugins"][0]["versions"], [])
         self.assertIsNone(cat["plugins"][0]["latest"])
         self.assertIn("cannot list", problems[0]["error"])
+        self.assertTrue(problems[0]["unreadable"])
 
     def test_registry_rules(self):
         self.assertEqual(catalog_build.check_entry(self.ENTRY, "x/test-synth.json"), [])
@@ -480,12 +609,44 @@ import catalog_issues  # noqa: E402
 
 
 class IssuesTest(unittest.TestCase):
-    def test_plan_dedupes_and_skips_open(self):
+    T = "Catalog: a %s failed validation"
+
+    def test_plan_dedupes_and_skips_known_titles(self):
         pr = [{"id": "a", "tag": "v1", "error": "x"}, {"id": "a", "tag": "v1", "error": "y"},
-              {"id": "a", "tag": "v2", "error": "z"}, {"id": "b", "tag": None, "error": "404"}]
-        got = catalog_issues.plan(pr, {"Catalog: a v2 failed validation"})
-        self.assertEqual([t for t, _ in got], ["Catalog: a v1 failed validation", "Catalog: b cannot be read"])
+              {"id": "a", "tag": "v2", "error": "z"}, {"id": "a", "tag": "v3", "error": "w"},
+              {"id": "b", "tag": None, "error": "404"}]
+        issues = [{"number": 1, "title": self.T % "v2", "state": "OPEN"}, {"number": 2, "title": self.T % "v3", "state": "CLOSED"}]
+        got, close = catalog_issues.plan(pr, issues)
+        self.assertEqual([t for t, _ in got], [self.T % "v1", "Catalog: b cannot be read"])   # v3 was closed: not reopened
         self.assertIn("- x", got[0][1]); self.assertIn("- y", got[0][1])
+        self.assertEqual(close, [])
+
+    def test_superseded_fixed_and_duplicate_issues_close(self):
+        pr = [{"id": "a", "tag": "v1", "error": "x", "superseded": True}, {"id": "a", "tag": "v4", "error": "y"},
+              {"id": "c", "tag": None, "error": "cannot list releases: 502", "unreadable": True}]
+        issues = [{"number": n, "title": t, "state": st} for n, t, st in [
+            (10, self.T % "v1", "OPEN"),             # superseded: closed
+            (11, self.T % "v2", "OPEN"),             # no longer reported: closed
+            (12, self.T % "v4", "OPEN"), (13, self.T % "v4", "OPEN"),   # still failing; 13 is a duplicate
+            (14, "Catalog: c v1 failed validation", "OPEN"),   # c could not be read this time: left alone
+            (15, "Catalog: add a plugin please", "OPEN"),       # not one of ours
+            (16, self.T % "v3", "CLOSED")]]
+        got, close = catalog_issues.plan(pr, issues)
+        self.assertEqual([t for t, _ in got], ["Catalog: c cannot be read"])
+        self.assertEqual([n for n, _ in close], [10, 11, 13])
+        self.assertIn("newer release", close[0][1])
+
+    def test_cannot_be_read_reopens_but_a_per_tag_title_never_does(self):
+        # a tagless title's repo can go from unreadable to readable (closing its issue) and back to
+        # unreadable (the problem returns): only an open issue protects it from reopening. A per-tag
+        # title is different: a tag can't be rebuilt, so a closed issue is final.
+        pr = [{"id": "a", "tag": "v1", "error": "x"}, {"id": "b", "tag": None, "error": "cannot list releases: 502",
+                                                        "unreadable": True}]
+        issues = [{"number": 1, "title": self.T % "v1", "state": "CLOSED"},
+                  {"number": 2, "title": "Catalog: b cannot be read", "state": "CLOSED"}]
+        got, close = catalog_issues.plan(pr, issues)
+        self.assertEqual([t for t, _ in got], ["Catalog: b cannot be read"])
+        self.assertEqual(close, [])
 
 
 import catalog_site  # noqa: E402
@@ -1110,9 +1271,11 @@ class StoreTest(Base):
         for v, path in self.versions:
             if v not in published:
                 continue
-            m = catalog_check.check(path, catalog=True)[2]["manifest"]
+            rec = catalog_check.check(path, catalog=True)[2]
+            m = rec["manifest"]
             vs.append({"version": v, "size": os.path.getsize(path), "sha256": self.hashlib.sha256(open(path, "rb").read()).hexdigest(),
                        "param_compat": int(v.split(".")[0]), "manifest": m, "channel": "stable", "yanked": False,
+                       "os_compat": rec.get("os_compat"), "max_glibc": rec.get("max_glibc"),
                        "url": "http://127.0.0.1:%d/%s" % (self.port, os.path.basename(path))})
         vs.sort(key=lambda x: [int(n) for n in x["version"].split(".")], reverse=True)
         cat = {"schema": 1, "plugins": [{"id": "test-synth", "name": "Test Synth", "kind": "instrument", "distribution": "release",
@@ -1131,8 +1294,8 @@ class StoreTest(Base):
         helpers = [(n, os.path.join(self.web, n)) for n in ("sync.sh", "plugin_list.awk")]
         open(os.path.join(self.web, "catalog.tsv"), "w").write(self.catalog_site.tsv(cat, helpers))
 
-    def store(self, *args, stdin=""):
-        env = dict(os.environ, MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_TEST_LOG=self.log, MPC_STORE_TMP=self.tmp,
+    def store(self, *args, stdin="", env_extra=None):
+        env = dict(os.environ, **(env_extra or {}), MPC_INSTALL_TEST="1", MPC_SETTINGS=self.settings_path, MPC_TEST_LOG=self.log, MPC_STORE_TMP=self.tmp,
                    MPC_LEGACY_ROOT=os.path.join(self.tmp, "nolegacy"),
                    ADDIN_INSTALL_TEST="1", SYSTEMD_ROOT=os.path.join(self.tmp, "root"), ADDIN_TEST_LOG=os.path.join(self.tmp, "addin.log"),
                    MPC_ADDINS=os.path.join(self.tmp, "addins"))
@@ -1159,6 +1322,45 @@ class StoreTest(Base):
         self.assertNotIn("byo", r.stdout)
         os.makedirs(os.path.join(self.synths, self.SKIN))                        # a folder somebody copied there by hand
         self.assertIn("manual", self.store("list").stdout)
+
+    def fake_libc(self, text=None, name="libc.so.6"):
+        """A stand-in for the device's libc: an executable that prints what glibc prints when run, or (text=None) a plain file."""
+        path = os.path.join(self.tmp, name)
+        open(path, "w").write("#!/bin/sh\necho '%s'\n" % text if text else "x")
+        os.chmod(path, 0o755 if text else 0o644)
+        return {"MPC_STORE_LIBC": path}
+
+    OLD_LIB = "GNU C Library (Buildroot 2021.02.12) stable release version 2.33."
+
+    def test_a_3x_only_plugin_on_a_device_that_looks_like_2x_gets_a_note_and_still_installs(self):
+        r = self.store("install", "test-synth", env_extra=self.fake_libc(self.OLD_LIB))   # the fake package's skin is "{}": 3.x only
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("NOTE: Test Synth 1.2.0 is made for MPC OS 3.x", r.stdout)
+        self.assertIn("glibc 2.33", r.stdout)
+        self.assertEqual(self.calls(), ["stop", "start"])
+
+    def test_no_note_on_a_3x_device_or_when_the_libc_cannot_be_found(self):
+        for env in (self.fake_libc("GNU C Library (GNU libc) stable release version 2.39."),
+                    {"MPC_STORE_LIBC": os.path.join(self.tmp, "nothing-here")}):
+            r = self.store("install", "test-synth", env_extra=env)
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+            self.assertNotIn("NOTE:", r.stdout)
+            self.assertNotIn("WARNING:", r.stdout)
+            shutil.rmtree(os.path.join(self.synths, self.SKIN), ignore_errors=True)
+
+    def test_a_plugin_that_needs_a_newer_glibc_than_the_device_has_gets_a_warning(self):
+        r = self.store("install", "test-synth", env_extra=self.fake_libc("GNU C Library stable release version 2.28."))
+        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        self.assertIn("WARNING: Test Synth 1.2.0 needs glibc 2.30 but this device has 2.28", r.stdout)
+        self.assertNotIn("NOTE:", r.stdout)
+
+    def test_older_glibc_is_read_from_the_library_file_name(self):
+        r = self.store("install", "test-synth", env_extra=self.fake_libc(None, name="libc-2.32.so"))
+        self.assertIn("NOTE: Test Synth 1.2.0 is made for MPC OS 3.x", r.stdout)
+        self.assertIn("glibc 2.32", r.stdout)
+
+    def test_list_marks_3x_only_plugins(self):
+        self.assertIn("[MPC OS 3.x only]", self.store("list").stdout)
 
     def test_install_verifies_installs_and_restarts_mpc_once(self):
         r = self.store("install", "test-synth")

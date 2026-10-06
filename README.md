@@ -12,6 +12,8 @@ folders deep, the old recording you made years ago. Every dip is a surprise, and
 <img width="320" height="200" alt="image" src="https://github.com/user-attachments/assets/b4d44e0b-d017-4bec-8e28-928150d2f30d" />
 Lucky Dip is a native plugin (VST2) for MPC OS standalone devices. It was built and tested on an **Akai Force** (MPC OS
 3.9.1.x); it should load on any MPC OS standalone unit with the same plugin host, but those haven't been tested yet.
+Since 0.9.1 the skin is also written in the MPC OS 2.x shape (checked against MPC OS 2.15.1's own skins, library needs glibc 2.30),
+so the catalog lists it as "2.x + 3.x", but it has **not been tried on a 2.x unit yet**; reports from MPC Live / One / X users are welcome.
 
 ## What it does
 - **Scans your sample folders** and sorts every sample into one of 23 categories (kick, snare, rim, clap, hat, closed hat,

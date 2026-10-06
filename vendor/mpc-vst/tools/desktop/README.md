@@ -17,7 +17,7 @@ one MPC stop and start around the whole batch when the installers allow it.
    The device scan lists every writable `Synths` location (the internal drive, and `/media/*/Synths` for cards and drives; read-only mounts such as
    MPC's own content folder are skipped, and the same storage reached by two paths is listed once). Step 3 lets you pick where to install, the
    internal drive by default, and warns when MPC does not list the folder as a content location. A drive that cannot store symbolic links
-   (FAT, exFAT, NTFS) is refused for a package that needs them, and so is a drive without room. A drive mounted `noexec` (a Force's SSD is) is refused too: MPC cannot load a plugin from it, so the plugin would be listed but only show "Load Plugin".
+   (FAT, exFAT, NTFS) is refused for a package that needs them, and so is a drive without room. A drive mounted `noexec` (an MPC/Force's SSD is) is refused too: MPC cannot load a plugin from it, so the plugin would be listed but only show "Load Plugin".
 2. **Choose:** the catalog's newest stable release of every downloadable plugin, plus any zips you drop in. A search box, kind and
    developer filters, a sort, and a "show" filter (not on the device, on the device, updates available, only the ones you ticked) keep a
    long list manageable; what you ticked stays ticked while you filter, and a bar at the bottom shows the count and an Install button.
@@ -44,7 +44,7 @@ one MPC stop and start around the whole batch when the installers allow it.
    same on the device.
 7. **Advanced: device patches** (step 7, collapsed, read only for now; `docs/PATCHES.md`): lists the patches in `patches.json` (published next to
    `catalog.json`) and, when you open the step or press "Check the device", asks the device which are applied. A patch changes the device itself,
-   not a plugin. The app downloads the script, checks it against the manifest's sha256, copies it to a private folder on the device, runs only its
+   not a plugin; a row shows Not applied, Applied, Installed-not-active, or why it is not supported (for example the device's MPC checksum, or that no drive is mounted `noexec`). The app downloads the script, checks it against the manifest's sha256, copies it to a private folder on the device, runs only its
    `status` command and removes the copy. It does not apply or undo anything; the page says how to run the script yourself. Nothing is asked of the
    device at connect time, and not while a job runs. Tests: `patches_test.go`, and `ui_test/ui_patches.py` (a browser test with the API stubbed).
 
@@ -54,9 +54,17 @@ location step 3 picked. Step 4 lists the addins found there after the plugins; o
 which removal runs (it takes the addin out of MPC's `LD_PRELOAD` and deletes its folder; `MPC.settings` is not touched). A folder
 without one is listed but not removable here.
 
-The catalog says, for every version, whether its installer understands `-n` (`defer` in `catalog.json`, the last column of `catalog.tsv`).
+The catalog says, for every version, whether its installer understands `-n` (`defer` in `catalog.json`, column 14 of `catalog.tsv`).
 The page uses that to state the exact number of MPC restarts before you confirm, and marks releases whose older installer restarts MPC by
 itself. A zip you drop in is inspected directly.
+
+**MPC OS badge and warnings.** The catalog also says which MPC OS generations a version works on (`os_compat`, `os_compat_why` and `max_glibc` in
+`catalog.json`; columns 15 and 16 of `catalog.tsv`; docs/OS2_SKINS.md). The list shows "MPC OS 2.x + 3.x" or "MPC OS 3.x only", and connecting
+reads the device's glibc (`libc` in the device info: run the libc for its version, or take it from `libc-2.33.so`; nothing is guessed when
+neither works). Against that glibc the list adds a note per plugin, and the install dialog repeats it: a plugin that needs a newer glibc than
+the device has "will not load" (the button becomes *Install anyway*), and a 3.x-only plugin on a device below glibc 2.34 (MPC OS 2.x) "may
+show an empty touchscreen page". It warns and never blocks. Tests: `catalog_test.go`, `device_test.go` (`TestDialReadsTheDevicesGlibc`) and
+`ui_test/ui_os.py` (a browser test with the API stubbed). `tools/mpc-store.sh` prints the same notes before its confirmation.
 
 What was installed is written to `<Synths>/.mpc-store` on the device, so `mpc-store.sh update` (the on-device script) knows about it.
 

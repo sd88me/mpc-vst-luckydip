@@ -1,6 +1,6 @@
 # Vendored: mpc-vst-plugins build toolchain
 
-Source: https://github.com/sd88me/mpc-vst-plugins, commit `bbbb5945cbedb922b3d486d0f6f0bee9f4768854`
+Source: https://github.com/sd88me/mpc-vst-plugins, commit `a4b8f861d07153a2b387d7520331f532f7247502`
 (`wrapper/`, `tools/`, `adapters/` as committed; nothing changed locally).
 
 Why it is here: Lucky Dip builds with no sibling checkout and no network fetch. `vst/build.sh` and `vst/test.sh` use this

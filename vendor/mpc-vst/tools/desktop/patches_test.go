@@ -290,3 +290,51 @@ func TestRowJSONKeepsTheManifestBackupFolderAndTheDeviceFlagApart(t *testing.T) 
 		t.Errorf(`"backup" must stay the folder and "hasBackup" the flag: %s`, b)
 	}
 }
+
+func TestPartialStateAndReasonTokens(t *testing.T) {
+	st, ok := parseStateLine([]string{"STATE state=partial supported=1 backup=1"})
+	if !ok || st.State != "partial" || !st.Supported {
+		t.Errorf("partial: %v %+v", ok, st)
+	}
+	st, ok = parseStateLine([]string{"STATE state=unsupported supported=0 backup=0 reason=no-noexec-drive"})
+	if !ok || st.Reason != "no-noexec-drive" {
+		t.Errorf("reason: %v %+v", ok, st)
+	}
+	for _, bad := range []string{"reason=Bad Token", "reason=a;b", "reason=" + strings.Repeat("a", 60), "reason=-x"} {
+		if st, ok := parseStateLine([]string{"STATE state=unsupported supported=0 backup=0 " + bad}); !ok || st.Reason != "" {
+			t.Errorf("%q must be dropped: %v %+v", bad, ok, st)
+		}
+	}
+}
+
+func TestRowsExplainReasonsAndPartialInstalls(t *testing.T) {
+	fd := newFakeDevice(t)
+	d, err := Dial("127.0.0.1", "secret", fd.cfg())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer d.Close()
+	var p Patch
+	p.ID, p.Supports.Arch, p.Supports.OS = "drive-exec", "armv7l", "Force Gen1, MPC OS 3.9.1"
+	row := func(line string) PatchRow {
+		return PatchRows(d, []Patch{p}, func(Patch) ([]byte, error) { return []byte("#!/bin/sh\necho '" + line + "'\n"), nil })[0]
+	}
+	if r := row("STATE state=unsupported supported=0 backup=0 reason=no-noexec-drive"); r.State != "unsupported" || !strings.Contains(r.Detail, "No drive is mounted") || strings.Contains(r.Detail, "checksum") {
+		t.Errorf("a reason gets its own sentence, not the MPC-checksum one: %+v", r)
+	}
+	if r := row("STATE state=unsupported supported=0 backup=0 reason=other-install"); !strings.Contains(r.Detail, "original ForceHD VST Exec") {
+		t.Errorf("the original install gets its own sentence: %+v", r)
+	}
+	if r := row("STATE state=unsupported supported=0 backup=0 reason=something-new"); !strings.Contains(r.Detail, "does not recognise this device") {
+		t.Errorf("an unknown reason falls back: %+v", r)
+	}
+	if r := row("STATE state=partial supported=1 backup=1"); r.State != "partial" || !strings.Contains(r.Detail, "not active") || !r.Supported {
+		t.Errorf("partial: %+v", r)
+	}
+	if r := row("STATE state=partial supported=1 backup=0 reason=not-loaded"); !strings.Contains(r.Detail, "has not loaded") || strings.Contains(r.Detail, "drive") {
+		t.Errorf("a partial reason gets its own sentence: %+v", r)
+	}
+	if r := row("STATE state=patched supported=1 backup=1"); r.State != "patched" || r.Detail != "" {
+		t.Errorf("patched has no detail: %+v", r)
+	}
+}

@@ -17,6 +17,9 @@ vst.json (paths are relative to the vst.json's folder):
       "effect": true,                            # optional: an audio effect (2 inputs, category Effect); the engine provides process()
       "custom_skin": true,                       # optional: params.h + plugin-list entry only; the port makes the skin itself
       "defines": {"HAS_LFO_BPM": 1},             # optional extra #defines in params.h
+                                                 #   (HAS_LFO_BPM: host tempo as "lfo_bpm"; HAS_TRANSPORT: play/stop as "transport")
+                                                 #   (HAS_DISPLAY_REV: the DSP changes values by itself; the wrapper polls its "display_rev" and
+                                                 #   refreshes the host; PARAM_TEXT_MAX: readout length, default 24 -- see wrapper/vst2_wrap.c)
       "build": {"root": "..", "sources": ["src/engine.c"], "cflags": ["-Isrc"], "libs": ["-lm"]}
     }
 The sources provide mpc_engine() (wrapper/engine.h). An engine from another ecosystem names its own
@@ -79,7 +82,7 @@ def gen_params(cfg, params, out):
              "typedef struct { const char *key, *name, *unit; float min, max, def; int nopts; "
              "const char *const *opts; int momentary; int string_display; int int_display; "
              "int step_target; float step_delta; int popup_of; int hold_ms; int dynamic_name; int dynamic_display; "
-             "int qlink_ticks; int no_poll; } param_t;"]
+             "int qlink_ticks; int no_poll; int nudge_pct; } param_t;"]
     key_to_index = {p["key"]: i for i, p in enumerate(params)}
     rows = []
     for i, p in enumerate(params):
@@ -120,23 +123,28 @@ def gen_params(cfg, params, out):
         # for text changes (every 100 ms; housekeeping in vst2_wrap.c): a readout that only changes on a tap, or
         # one whose get_param() is costly.
         no_poll = int(p.get("poll", True) is False)
+        # "nudge_pct" -- for a long "display": "int" list (a bank list of up to 998): any move up to this percent of the range
+        # (a Q-Link event is 1/128 of it, a wheel click 1/100) is ONE step in its direction instead of crossing eight to ten
+        # entries; a bigger move (automation, a drag) still sets the value outright. 0 = off. Combine with qlink_ticks to
+        # slow it further. 10 suits a Q-Link and the wheel.
+        nudge = int(p.get("nudge_pct", 0))
         if opts:
             lines.append("static const char *const OPTS_%d[] = {%s};" % (i, ", ".join(c_str(o) for o in opts)))
             d = p.get("default", 0)
             if isinstance(d, str):
                 d = opts.index(d) if d in opts else 0
             norm = d / (len(opts) - 1) if len(opts) > 1 else 0
-            rows.append("    {%s, %s, \"\", 0, 0, %s, %d, OPTS_%d, %d, %d, %d, %d, %s, %d, %d, %d, %d, %d, %d}," % (
+            rows.append("    {%s, %s, \"\", 0, 0, %s, %d, OPTS_%d, %d, %d, %d, %d, %s, %d, %d, %d, %d, %d, %d, %d}," % (
                 c_str(p["key"]), name, fl(norm), len(opts), i, bool(p.get("momentary")), is_str, is_int,
-                step_target, fl(step_delta), popup_of, p.get("hold_ms", 0), dyn, dyn_disp, qticks, no_poll))
+                step_target, fl(step_delta), popup_of, p.get("hold_ms", 0), dyn, dyn_disp, qticks, no_poll, nudge))
         else:
             lo, hi = p.get("min", 0), p.get("max", 1)
             d = p.get("default", lo)
             norm = (d - lo) / (hi - lo) if hi > lo else 0
-            rows.append("    {%s, %s, %s, %s, %s, %s, 0, 0, %d, %d, %d, %d, %s, %d, %d, %d, %d, %d, %d}," % (
+            rows.append("    {%s, %s, %s, %s, %s, %s, 0, 0, %d, %d, %d, %d, %s, %d, %d, %d, %d, %d, %d, %d}," % (
                 c_str(p["key"]), name, c_str(p.get("unit", "")), fl(lo), fl(hi), fl(norm),
                 bool(p.get("momentary")), is_str, is_int, step_target, fl(step_delta), popup_of, p.get("hold_ms", 0), dyn, dyn_disp,
-                qticks, no_poll))
+                qticks, no_poll, nudge))
     lines += ["static const param_t PARAMS[] = {"] + rows + ["};", "#define NPARAMS %d" % len(params),
               "#define PLUG_NAME %s" % c_str(cfg["name"]), "#define PLUG_VENDOR %s" % c_str(cfg["vendor"]),
               "#define PLUG_UID 0x%08x /* '%s' */" % (int.from_bytes(cfg["uid"].encode(), "big"), cfg["uid"]),

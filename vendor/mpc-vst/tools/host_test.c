@@ -1,7 +1,8 @@
 /* Offline x86 host test for a port built on wrapper/vst2_wrap.c: link it with the wrapper, the engine
  * (and its adapter) and the port's generated params.h -- tools/test_port.sh does all that -- and run
  * under ASan. Checks two independent instances, names/display for every param, a set/get round
- * trip, option selection, popup open/close, note -> audio, and chunk save/restore. Exit 1 on failure. */
+ * trip, option selection, popup open/close, note -> audio, chunk save/restore, step_of on an option list and, with
+ * HAS_TRANSPORT, play/stop/jump-back (poc/steptest). Exit 1 on failure. */
 #include <stdio.h>
 #include <stdint.h>
 #include <string.h>
@@ -18,10 +19,11 @@ typedef struct { int32_t n; intptr_t r; void* ev[2]; } EV;
 extern AEffect* VSTPluginMain(cb);
 
 static int automated[NPARAMS > 0 ? NPARAMS : 1], fails;
+static double ti[16];                    /* VstTimeInfo: [3] ppqPos, [4] tempo, flags = ((int32_t *)&ti[8])[5] */
+static int32_t ti_flags = 1 << 10;       /* tempo valid; transport_tests() adds playing (1 << 1) and ppq valid (1 << 9) */
 static intptr_t host(AEffect*e,int32_t op,int32_t i,intptr_t v,void*p,float o){
-    static double ti[16];
     if (op == 0 && i >= 0 && i < NPARAMS) automated[i]++;
-    if (op == 7) { ti[4] = 120.0; ((int32_t*)&ti[8])[5] = 1 << 10; return (intptr_t)ti; }
+    if (op == 7) { ti[4] = 120.0; ((int32_t*)&ti[8])[5] = ti_flags; return (intptr_t)ti; }
     return 0;
 }
 #define CHECK(c, ...) do { printf("%s ", (c) ? "ok  " : "FAIL"); printf(__VA_ARGS__); printf("\n"); if (!(c)) fails++; } while (0)
@@ -120,6 +122,56 @@ static void sample_accurate_tests(void) {
 }
 #endif
 
+static int find_param(const char *key) {
+    for (int i = 0; i < NPARAMS; i++) if (!strcmp(PARAMS[i].key, key)) return i;
+    return -1;
+}
+
+#if defined(HAS_TRANSPORT) && HAS_TRANSPORT
+/* poc/steptest: the engine logs every "transport" value it gets in its "transport_log" readout. Play sends "1", stop "0",
+ * a jump back in song position while playing (a loop, a locate) "1" again; moving forward sends nothing. */
+static void transport_tests(void) {
+    int lg = find_param("transport_log");
+    if (lg < 0) { printf("warn HAS_TRANSPORT without a transport_log readout: not tested\n"); return; }
+    AEffect *c = VSTPluginMain(host);
+    char d[64];
+    run(c, 2);                                           /* stopped: nothing */
+    ti_flags = 1 << 10 | 1 << 9 | 1 << 1; ti[3] = 0; run(c, 1);   /* play */
+    ti[3] = 1.0; run(c, 1); ti[3] = 2.0; run(c, 1);      /* forward */
+    ti[3] = 0.5; run(c, 1);                              /* jump back */
+    ti[3] = 0.6; run(c, 1);
+    ti_flags = 1 << 10 | 1 << 9; run(c, 2);              /* stop */
+    ti_flags = 1 << 10; ti[3] = 0;
+    d[0] = 0; c->d(c, 7, lg, 0, d, 0);
+    CHECK(!strcmp(d, "110"), "transport: play, jump back, stop -> \"%s\" (want \"110\")", d);
+    c->d(c, 1, 0, 0, 0, 0);
+}
+#endif
+
+/* A step_of button pair on an option list (e.g. a synth model picked with prev/next): steps by index, wraps both ways, and
+ * tells the host the new value (audioMasterAutomate) on the next block. */
+static void step_of_option_tests(AEffect *a) {
+    int prev = -1, next = -1;
+    for (int i = 0; i < NPARAMS; i++)
+        if (PARAMS[i].step_target >= 0 && PARAMS[PARAMS[i].step_target].nopts > 1) {
+            if (PARAMS[i].step_delta < 0 && prev < 0) prev = i;
+            if (PARAMS[i].step_delta > 0 && next < 0) next = i;
+        }
+    if (prev < 0 || next < 0 || PARAMS[prev].step_target != PARAMS[next].step_target) return;
+    int t = PARAMS[next].step_target, n = PARAMS[t].nopts;
+    a->setP(a, t, 1.0f); run(a, 1);
+    automated[t] = 0;
+    a->setP(a, next, 1.0f); run(a, 1); a->setP(a, next, 0.0f);
+    CHECK(a->getP(a, t) < 1e-3f && automated[t] == 1, "step_of %s on %s: last -> first (%.3f), reported %d time(s)",
+          PARAMS[next].key, PARAMS[t].key, a->getP(a, t), automated[t]);
+    a->setP(a, prev, 1.0f); run(a, 1); a->setP(a, prev, 0.0f);
+    CHECK(fabsf(a->getP(a, t) - 1.0f) < 1e-3f && automated[t] == 2, "step_of %s on %s: first -> last (%.3f)",
+          PARAMS[prev].key, PARAMS[t].key, a->getP(a, t));
+    a->setP(a, prev, 1.0f); run(a, 1); a->setP(a, prev, 0.0f);
+    CHECK(fabsf(a->getP(a, t) - (float)(n - 2) / (n - 1)) < 1e-3f, "step_of %s on %s: steps one option (%.3f)",
+          PARAMS[prev].key, PARAMS[t].key, a->getP(a, t));
+}
+
 int main(void) {
     AEffect *a = VSTPluginMain(host), *b = VSTPluginMain(host);
     CHECK(a && b && a != b, "two instances");
@@ -194,6 +246,35 @@ int main(void) {
         a->setP(a, i, PARAMS[i].def);
         break;
     }
+    for (int i = 0; i < NPARAMS; i++) {   /* a long whole-number list (a bank list): nudge_pct makes each Q-Link event and wheel click one step */
+        const param_t *p = &PARAMS[i];
+        if (p->nopts || !p->int_display || p->nudge_pct <= 0 || p->max - p->min < 2) continue;
+        float range = p->max - p->min, rate[2] = {1.0f / 128, 0.01f};   /* a Q-Link event and a data wheel click, of the whole range */
+        const char *who[2] = {"Q-Link events", "data wheel clicks"};
+        for (int r = 0; r < 2; r++) {
+            a->setP(a, i, 0); int ok = 1;
+            for (int k = 1; k <= 6; k++) {
+                a->setP(a, i, a->getP(a, i) + rate[r]);
+                if (fabsf(a->getP(a, i) * range - k) > 0.05f) ok = 0;
+            }
+            CHECK(ok, "%s: six %s step six, not %.0f at a time (%.2f)", p->key, who[r], range * rate[r], a->getP(a, i) * range);
+            ok = 1;
+            for (int k = 5; k >= 0; k--) {   /* and back down to the minimum, MPC clamping what it sends at 0 */
+                float v = a->getP(a, i) - rate[r];
+                a->setP(a, i, v < 0 ? 0 : v);
+                if (fabsf(a->getP(a, i) * range - k) > 0.05f) ok = 0;
+            }
+            CHECK(ok, "%s: six %s step back down to the minimum (%.2f)", p->key, who[r], a->getP(a, i) * range);
+        }
+        a->setP(a, i, 0.5f);
+        CHECK(fabsf(a->getP(a, i) - 0.5f) <= 0.5f / range + 1e-3f, "%s: a jump past the nudge range lands outright (%.3f)", p->key, a->getP(a, i));
+        a->setP(a, i, 1.0f - 1.0f / 128);
+        float below = roundf(a->getP(a, i) * range);
+        a->setP(a, i, 1.0f);   /* clamped at the maximum from within the nudge range: one step up, not a jump to the end */
+        CHECK(fabsf(a->getP(a, i) * range - (below + 1)) < 0.05f, "%s: at the top a clamped move is one step (%.2f from %.0f)", p->key, a->getP(a, i) * range, below);
+        a->setP(a, i, p->def);
+        break;
+    }
     for (int i = 0; i < NPARAMS; i++)   /* the first whole-number param */
         if (!PARAMS[i].nopts && PARAMS[i].int_display && PARAMS[i].qlink_ticks <= 1 && PARAMS[i].max - PARAMS[i].min >= 2) { step_tests(a, i, "int", (int)(PARAMS[i].max - PARAMS[i].min)); break; }
     if (pop >= 0) {
@@ -232,6 +313,10 @@ int main(void) {
 #ifdef SAMPLE_PROBE
     sample_accurate_tests();
 #endif
+#if defined(HAS_TRANSPORT) && HAS_TRANSPORT
+    transport_tests();
+#endif
+    step_of_option_tests(a);
     void *ch = 0; intptr_t n = a->d(a, 23, 0, 0, &ch, 0);
     if (n > 0) {
         b->d(b, 24, 0, n, ch, 0);

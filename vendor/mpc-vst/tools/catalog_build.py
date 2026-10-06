@@ -250,7 +250,8 @@ def tag_versions(e, src, yanked, tested, keep, problems):
     try:
         tags = src.list_tags(repo)
     except Exception as ex:  # repo missing, private or unreachable
-        problems.append({"id": e["id"], "tag": None, "error": "cannot read the repo or its tags (does it exist and is it public?): %s" % ex})
+        problems.append({"id": e["id"], "tag": None, "unreadable": True,
+                         "error": "cannot read the repo or its tags (does it exist and is it public?): %s" % ex})
         return []
     try:   # a built zip published on a release would break the licence position: shout, but keep the entry listed
         for rel in src.list_releases(repo):
@@ -262,7 +263,8 @@ def tag_versions(e, src, yanked, tested, keep, problems):
                                      "LICENCE RISK: release asset %s is published, but a build-yourself plugin embeds the user's own "
                                      "firmware and must never ship a built zip. Delete the asset." % a["name"]})
     except Exception as ex:
-        problems.append({"id": e["id"], "tag": None, "error": "cannot check releases for a published zip: %s" % ex})
+        problems.append({"id": e["id"], "tag": None, "unreadable": True,
+                         "error": "cannot check releases for a published zip: %s" % ex})
     semver = [(tuple(int(x) for x in m.groups()), t) for t in tags for m in [TAG_VERSION.fullmatch(t["name"])] if m]
     if not semver:
         problems.append({"id": e["id"], "tag": None, "error": "no vX.Y.Z tag found: tag a release to be listed"})
@@ -295,7 +297,8 @@ def tag_versions(e, src, yanked, tested, keep, problems):
 
 
 def build(entries, src, cache, yanked, keep=10, now=None):
-    """-> (catalog dict, problems list [{id, tag, error}])."""
+    """-> (catalog dict, problems list [{id, tag, error, unreadable?, superseded?}]). "unreadable" marks a repo or
+    release list that could not be read at all, as opposed to one that was read and found invalid."""
     os.makedirs(cache, exist_ok=True)
     plugins, problems = [], []
     for e in entries:
@@ -303,11 +306,13 @@ def build(entries, src, cache, yanked, keep=10, now=None):
         build_yourself = e.get("distribution", "release") == "build-yourself"
         releases = []
         all_time = 0   # every published release asset ever, whether or not it is listed (invalid, yanked or past --keep)
+        shared_repo = sum(1 for o in entries if o["repo"].lower() == e["repo"].lower()) > 1   # told apart by asset_pattern
+        failed = []    # this entry's failing releases, with their publish time (see "superseded" below)
         if not build_yourself:
             try:
                 releases = src.list_releases(e["repo"])
             except Exception as ex:  # a repo we can't read: keep going, report it
-                problems.append({"id": e["id"], "tag": None, "error": "cannot list releases: %s" % ex})
+                problems.append({"id": e["id"], "tag": None, "unreadable": True, "error": "cannot list releases: %s" % ex})
         tested = []
         if hasattr(src, "tested"):
             try:
@@ -316,17 +321,21 @@ def build(entries, src, cache, yanked, keep=10, now=None):
                 problems.append({"id": e["id"], "tag": None, "error": "tested.json ignored: %s" % ex})
         if build_yourself:
             versions = tag_versions(e, src, yanked, tested, keep, problems)
+        newest = max((r for r in releases if not r.get("draft")), key=lambda r: r.get("published_at") or "", default=None)
         for rel in releases:
             if rel.get("draft"):
                 continue
             tag = rel.get("tag_name")
             assets = [a for a in rel.get("assets", []) if fnmatch.fnmatch(a["name"], e.get("asset_pattern", "*-mpc-armv7.zip"))]
             all_time += sum(a.get("download_count", 0) for a in assets)
-            if not assets and "asset_pattern" in e:
-                continue   # another plugin's release in a shared repo
+            if not assets and "asset_pattern" in e and (shared_repo or rel is not newest):
+                continue   # another plugin's release in a shared repo, or an old release from before the pattern existed
             if len(assets) != 1:
-                problems.append({"id": e["id"], "tag": tag, "error": "expected one asset matching the pattern, found %d" % len(assets)})
+                failed.append(({"id": e["id"], "tag": tag, "error": "expected one asset matching %s, found %d" % (
+                                    e.get("asset_pattern", "*-mpc-armv7.zip"), len(assets))},
+                               rel.get("published_at") or ""))
                 continue
+            pub = rel.get("published_at") or ""
             asset = assets[0]
             zpath = os.path.join(cache, "%s-%s.zip" % (e["id"], asset["id"]))
             try:
@@ -334,16 +343,16 @@ def build(entries, src, cache, yanked, keep=10, now=None):
                     src.download(asset, zpath)
                 errors, warnings, rec = catalog_check.check(zpath, catalog=True, expect_id=e["id"], expect_repo=e["repo"])
             except Exception as ex:
-                problems.append({"id": e["id"], "tag": tag, "error": "download/validate failed: %s" % ex})
+                failed.append(({"id": e["id"], "tag": tag, "error": "download/validate failed: %s" % ex}, pub))
                 continue
             if not errors and (rec["manifest"]["kind"] == "addin") != (e["kind"] == "addin"):
                 errors = ["the release is a%s but the registry entry's kind is %s" % (
                     "n addin" if rec["manifest"]["kind"] == "addin" else " plugin", e["kind"])]
             if errors:
-                problems.append({"id": e["id"], "tag": tag, "error": "; ".join(errors)})
+                failed.append(({"id": e["id"], "tag": tag, "error": "; ".join(errors)}, pub))
                 continue
             if any(v["version"] == rec["version"] for v in versions):
-                problems.append({"id": e["id"], "tag": tag, "error": "duplicate version %s" % rec["version"]})
+                failed.append(({"id": e["id"], "tag": tag, "error": "duplicate version %s" % rec["version"]}, pub))
                 continue
             rec.update({
                 "url": asset["browser_download_url"],
@@ -354,9 +363,18 @@ def build(entries, src, cache, yanked, keep=10, now=None):
                 "warnings": warnings,
                 "downloads": asset.get("download_count", 0),
             })
+            rec["_published"] = pub
             rec["tested"] = [{k: t.get(k, "") for k in ("device", "firmware", "date")} for t in tested
                              if str(t["version"]).lstrip("v") == rec["version"]]
             versions.append(rec)
+        # A failing release is "superseded" when a release published after it passes and is not yanked: the catalog
+        # already serves the fix, and an old tag can't be rebuilt, so it is history, not something to report.
+        newest_good = max((v["_published"] for v in versions if not v["yanked"] and v.get("_published")), default="")
+        for prob, pub in failed:
+            prob["superseded"] = bool(newest_good and pub and pub < newest_good)
+            problems.append(prob)
+        for v in versions:
+            v.pop("_published", None)
         vkey = lambda v: tuple(int(x) for x in v["version"].split("."))
         versions.sort(key=vkey, reverse=True)
         versions = versions[:keep]

@@ -59,6 +59,18 @@ with sync_playwright() as p:
     pg.reload()
     check("preselected from the link, junk ignored", pg.locator("[data-pick]:checked").count() == 1 and pg.locator("#inst-count").text_content() == "1 plugin selected")
     check("no script ran", not errors, str(errors))
+    # MPC OS badge and filter (docs/OS2_SKINS.md): they must agree, whatever the catalog holds (a catalog built before the field has none)
+    pg.goto(URL)
+    check("MPC OS filter exists", pg.locator("#f-os").count() == 1)
+    for val, badge in (("2x", ".tag.ok"), ("3x", ".tag.warn:has-text('MPC OS 3.x only')")):
+        pg.select_option("#f-os", val)
+        cards = pg.locator("article.card")
+        wrong = [i for i in range(cards.count()) if cards.nth(i).locator(badge).count() != 1]
+        check("filter %s shows only cards with the matching badge" % val, not wrong, str(wrong))
+    pg.select_option("#f-os", index=0)
+    ok_tags = pg.locator(".tag.ok")
+    if ok_tags.count():
+        check("a 2.x badge says what it is", "2.x" in ok_tags.first.text_content() and ok_tags.first.get_attribute("title"))
     m = b.new_page(viewport={"width": 390, "height": 800}, device_scale_factor=2)
     m.goto(URL + "#sel=" + ids[0]); m.reload()
     m.locator("#inst > summary").click(); m.fill("#ip", "192.168.1.20")
