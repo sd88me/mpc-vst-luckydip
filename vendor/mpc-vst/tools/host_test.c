@@ -5,8 +5,10 @@
  * HAS_TRANSPORT, play/stop/jump-back (poc/steptest). Exit 1 on failure. */
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
+#include <pthread.h>
 #include "params.h"
 typedef struct AEffect AEffect;
 typedef intptr_t (*cb)(AEffect*,int32_t,int32_t,intptr_t,void*,float);
@@ -18,11 +20,12 @@ typedef struct { int32_t type,byteSize,deltaFrames,flags,noteLength,noteOffset; 
 typedef struct { int32_t n; intptr_t r; void* ev[2]; } EV;
 extern AEffect* VSTPluginMain(cb);
 
-static int automated[NPARAMS > 0 ? NPARAMS : 1], fails;
+static int automated[NPARAMS > 0 ? NPARAMS : 1], fails, updates;   /* updates: audioMasterUpdateDisplay calls */
 static double ti[16];                    /* VstTimeInfo: [3] ppqPos, [4] tempo, flags = ((int32_t *)&ti[8])[5] */
 static int32_t ti_flags = 1 << 10;       /* tempo valid; transport_tests() adds playing (1 << 1) and ppq valid (1 << 9) */
 static intptr_t host(AEffect*e,int32_t op,int32_t i,intptr_t v,void*p,float o){
     if (op == 0 && i >= 0 && i < NPARAMS) automated[i]++;
+    if (op == 42) updates++;
     if (op == 7) { ti[4] = 120.0; ((int32_t*)&ti[8])[5] = ti_flags; return (intptr_t)ti; }
     return 0;
 }
@@ -127,6 +130,28 @@ static int find_param(const char *key) {
     return -1;
 }
 
+#if defined(HAS_SONG_POS) && HAS_SONG_POS
+/* poc/songpos: the engine reports its last song_pos() call as "ppq|bpm|playing|frames|calls". One call per block, with the
+ * host's ppqPos and tempo and the play flag; ppq -1 and bpm 0 when the host gives no position. */
+static void song_pos_tests(void) {
+    int lg = find_param("pos_log");
+    if (lg < 0) { printf("warn HAS_SONG_POS without a pos_log readout: not tested\n"); return; }
+    AEffect *c = VSTPluginMain(host);
+    char d[64];
+    ti_flags = 1 << 10 | 1 << 9 | 1 << 1; ti[3] = 9.25; run(c, 1);          /* playing, tempo and position valid */
+    d[0] = 0; c->d(c, 7, lg, 0, d, 0);
+    CHECK(!strcmp(d, "9.250|120.0|1|128|1"), "song_pos: playing -> \"%s\" (want 9.250|120.0|1|128|1)", d);
+    ti_flags = 1 << 10 | 1 << 9; ti[3] = 3.5; run(c, 2);                     /* stopped: still reported, playing 0 */
+    d[0] = 0; c->d(c, 7, lg, 0, d, 0);
+    CHECK(!strcmp(d, "3.500|120.0|0|128|3"), "song_pos: stopped, two blocks -> \"%s\" (want 3.500|120.0|0|128|3)", d);
+    ti_flags = 1 << 10; run(c, 1);                                           /* no position from the host */
+    d[0] = 0; c->d(c, 7, lg, 0, d, 0);
+    CHECK(!strcmp(d, "-1.000|0.0|0|128|4"), "song_pos: no ppq -> \"%s\" (want -1.000|0.0|0|128|4)", d);
+    ti_flags = 1 << 10; ti[3] = 0;
+    c->d(c, 1, 0, 0, 0, 0);
+}
+#endif
+
 #if defined(HAS_TRANSPORT) && HAS_TRANSPORT
 /* poc/steptest: the engine logs every "transport" value it gets in its "transport_log" readout. Play sends "1", stop "0",
  * a jump back in song position while playing (a loop, a locate) "1" again; moving forward sends nothing. */
@@ -170,6 +195,177 @@ static void step_of_option_tests(AEffect *a) {
     a->setP(a, prev, 1.0f); run(a, 1); a->setP(a, prev, 0.0f);
     CHECK(fabsf(a->getP(a, t) - (float)(n - 2) / (n - 1)) < 1e-3f, "step_of %s on %s: steps one option (%.3f)",
           PARAMS[prev].key, PARAMS[t].key, a->getP(a, t));
+    /* a stepper pressed every block asks for an UpdateDisplay each time; the wrapper sends at most one per 50 ms */
+    run(a, 40); updates = 0;
+    for (int k = 0; k < 32; k++) { a->setP(a, next, 1.0f); run(a, 1); a->setP(a, next, 0.0f); }
+    CHECK(updates >= 1 && updates <= 2, "step_of %s pressed every block for 4096 frames: %d UpdateDisplay(s) (want 1-2, one per 50 ms)",
+          PARAMS[next].key, updates);
+}
+
+/* MIDI control (gen_vst.py cc_lines()): CC 20 moves the first Q-Link's parameter, NRPN n sets parameter n, and the
+ * host hears about it (throttled to every 1024 frames). */
+static void cc(AEffect *a, int num, int val) {
+    ME m = {1, sizeof(ME), 0, 0, 0, 0, {0xB0, (unsigned char)num, (unsigned char)val, 0}}; EV ev = {1, 0, {&m, 0}};
+    a->d(a, 25, 0, 0, &ev, 0);
+}
+/* whether a direct set of parameter i to v sticks (engine-driven displays, e.g. a meter level, don't keep a value) */
+static int keeps(AEffect *a, int i, float v) {
+    a->setP(a, i, v);
+    return fabsf(a->getP(a, i) - v) < 0.01f;
+}
+static void cc_tests(AEffect *a) {
+#ifdef HAS_CC_MAP
+    int q = PLUG_CC[0];
+    if (q >= 0 && keeps(a, q, 1.0f) && keeps(a, q, 0.0f)) {
+        memset(automated, 0, sizeof automated);
+        cc(a, 20, 0); cc(a, 20, 127);
+        run(a, 9);
+        CHECK(a->getP(a, q) > 0.99f, "CC 20 = 127 moves %s to the top (%g)", PARAMS[q].key, a->getP(a, q));
+        CHECK(automated[q] > 0, "CC 20's change of %s reported to the host", PARAMS[q].key);
+    }
+#endif
+#ifdef HAS_NRPN
+    for (int i = 0; i < NPARAMS; i++) {
+        if (PARAMS[i].nopts || PARAMS[i].momentary || PARAMS[i].string_display || PARAMS[i].step_target >= 0 ||
+            PARAMS[i].popup_of >= 0 || PARAMS[i].int_display || PARAMS[i].max <= PARAMS[i].min) continue;
+        if (!keeps(a, i, 0.5f) || !keeps(a, i, 0.0f)) continue;
+        cc(a, 99, i >> 7); cc(a, 98, i & 127); cc(a, 6, 64); cc(a, 38, 0);
+        CHECK(fabsf(a->getP(a, i) - 8192.0f / 16383.0f) < 0.01f, "NRPN %d sets %s to the middle (%g)", i, PARAMS[i].key, a->getP(a, i));
+        break;
+    }
+#endif
+}
+
+#ifdef SELFSET_PROBE
+/* poc/selfset (wrapper/engine.h mpc_engine_changed): the engine sets "level" from CC 1 and "shape" from CC 2 by itself and
+ * names each. The host hears about each as it would a MIDI CC's change (once, then at most every 1024 frames), an
+ * option's change with an UpdateDisplay, and about nothing the engine didn't name. */
+static void selfset_tests(void) {
+    int lv = find_param("level"), sh = find_param("shape"), pl = find_param("plain");
+    if (lv < 0 || sh < 0 || pl < 0) { printf("warn SELFSET_PROBE without level, shape and plain: not tested\n"); return; }
+    AEffect *c = VSTPluginMain(host);
+    run(c, 9);
+    memset(automated, 0, sizeof automated); updates = 0;
+    run(c, 9);
+    CHECK(!automated[lv] && !automated[sh] && !automated[pl] && !updates, "engine changes: none named, none reported");
+    cc(c, 1, 127); run(c, 9);
+    CHECK(fabsf(c->getP(c, lv) - 1.0f) < 1e-3f && automated[lv] == 1 && !automated[sh] && !updates,
+          "engine changes: CC 1 moves level to the top (%g), reported %d time(s), %d UpdateDisplay(s)", c->getP(c, lv), automated[lv], updates);
+    memset(automated, 0, sizeof automated); updates = 0;
+    cc(c, 2, 127); run(c, 9);
+    CHECK(fabsf(c->getP(c, sh) - 1.0f) < 1e-3f && automated[sh] == 1 && updates > 0 && !automated[lv],
+          "engine changes: CC 2 moves shape to its last option (%g), reported %d time(s), with an UpdateDisplay", c->getP(c, sh), automated[sh]);
+    memset(automated, 0, sizeof automated);
+    for (int k = 0; k < 64; k++) { cc(c, 1, k); run(c, 1); }   /* a change every block for 8192 frames */
+    CHECK(automated[lv] >= 7 && automated[lv] <= 9 && fabsf(c->getP(c, lv) - 63 / 127.0f) < 1e-3f,
+          "engine changes: a CC every block for 8192 frames reported %d times (every 1024 frames), ending where it stopped", automated[lv]);
+    CHECK(!automated[pl], "engine changes: plain, never named, never reported");
+    c->d(c, 1, 0, 0, 0, 0);
+}
+#endif
+
+/* Two threads, as a JUCE host drives a plugin: parameter sets/reads and display text on one, audio on the other. The
+ * wrapper runs one engine call at a time (vst2_wrap.c eng_set()); an engine that is unsafe without that crashes here. */
+static AEffect *g_two;
+static volatile int g_two_done;
+static void *screen_thread(void *arg) {
+    char txt[256];
+    unsigned r = 1;
+    (void)arg;
+    for (int k = 0; k < 3000 && !g_two_done; k++) {
+        int i = (int)((r = r * 1103515245u + 12345u) >> 8) % (NPARAMS > 0 ? NPARAMS : 1);
+        if (PARAMS[i].momentary || PARAMS[i].step_target >= 0) continue;
+        g_two->setP(g_two, i, (float)((r >> 4) % 1000) / 999.0f);
+        g_two->getP(g_two, i);
+        g_two->d(g_two, 7, i, 0, txt, 0);   /* effGetParamDisplay */
+    }
+    return 0;
+}
+static void two_thread_tests(AEffect *a) {
+    pthread_t t;
+    g_two = a; g_two_done = 0;
+    pthread_create(&t, 0, screen_thread, 0);
+    run(a, 300);
+    g_two_done = 1;
+    pthread_join(t, 0);
+    CHECK(1, "two threads: 3000 screen-side sets/reads while rendering");
+}
+
+/* VST programs (vst.json "presets" / "programs"): every program has a name, picking one moves the engine there, the
+ * plugin reports the new current program, and the parameters it set are reported back to the host (housekeeping). */
+static void program_tests(AEffect *a) {
+#if defined(NPRESETS) || defined(PROG_PARAM)
+    char name[64];
+    CHECK(a->np >= 1, "%d programs", a->np);
+    for (int k = 0; k < a->np; k++) {
+        name[0] = 0;
+        CHECK(a->d(a, 29, k, 0, name, 0) == 1 && name[0], "program %d is named \"%s\"", k, name);
+    }
+    int pick = a->np - 1;
+    if (pick == a->d(a, 3, 0, 0, 0, 0)) { printf("warn one program, already current: picking it changes nothing\n"); return; }
+    memset(automated, 0, sizeof automated);
+    a->d(a, 2, 0, pick, 0, 0);
+    run(a, 1);
+    CHECK(a->d(a, 3, 0, 0, 0, 0) == pick, "program %d is current after picking it", pick);
+#if defined(NPRESETS)
+    for (int i = 0; i < PRESETS[pick].n; i++) {
+        const param_t *p = &PARAMS[PRESETS[pick].values[i].param];
+        float want = p->nopts > 1 ? atof(PRESETS[pick].values[i].value) / (p->nopts - 1)
+                                  : (atof(PRESETS[pick].values[i].value) - p->min) / (p->max - p->min);
+        float got = a->getP(a, PRESETS[pick].values[i].param);
+        CHECK(fabsf(got - want) < 1e-3f, "preset \"%s\" sets %s (%g, want %g)", PRESETS[pick].name, p->key, got, want);
+        CHECK(automated[PRESETS[pick].values[i].param] > 0, "preset change of %s reported to the host", p->key);
+    }
+#endif
+#else
+    CHECK(a->np == 0, "no programs without vst.json presets/programs");
+#endif
+}
+
+/* MPC's plugin host (JUCE) sets parameter 0 to the far end of its range and straight back whenever it gets ready to play
+ * (on insert and on every STOP, for plugins without an editor; Live II trace 2026-10-10). That must leave the plugin as
+ * it was: with a preset as parameter 0 it loaded the preset twice and every knob moved since went back to it. The
+ * wrapper holds a host set of parameter 0 until the next block and drops a pair that ends where it started. */
+static int toggle_skip(int i) {
+    const param_t *p = &PARAMS[i];
+    if (p->momentary || p->step_target >= 0 || p->popup_of >= 0 || p->string_display) return 1;
+#ifdef PLUG_LIVE_COUNT
+    for (int k = 0; k < PLUG_LIVE_COUNT; k++) if (PLUG_LIVE[k] == i) return 1;
+#endif
+    return 0;
+}
+#if defined(PARAM_TEXT_MAX) && PARAM_TEXT_MAX > 64   /* a port that shows longer text (vst.json "defines") */
+#define TOGGLE_TEXT PARAM_TEXT_MAX
+#else
+#define TOGGLE_TEXT 64
+#endif
+static void param0_toggle_check(void) {
+    if (NPARAMS < 2) return;
+    AEffect *c = VSTPluginMain(host);
+    static char before[NPARAMS][TOGGLE_TEXT];
+    char d[TOGGLE_TEXT];
+    int moved = 0;
+    for (int i = 1; i < NPARAMS; i++) {   /* every knob moved, so a preset loaded under them shows */
+        const param_t *p = &PARAMS[i];
+        if (toggle_skip(i) || p->nopts || p->max <= p->min) continue;
+        c->setP(c, i, c->getP(c, i) < 0.5f ? 0.73f : 0.21f);
+        moved++;
+    }
+    run(c, 2);
+    for (int i = 0; i < NPARAMS; i++) { before[i][0] = 0; c->d(c, 7, i, 0, before[i], 0); }
+    float old = c->getP(c, 0);
+    c->setP(c, 0, old < 0.5f ? 1.0f : 0.0f);   /* what JUCE's prepareToPlay does */
+    c->setP(c, 0, old);
+    run(c, 2);
+    int changed = 0;
+    for (int i = 0; i < NPARAMS; i++) {
+        if (toggle_skip(i)) continue;
+        d[0] = 0; c->d(c, 7, i, 0, d, 0);
+        if (strcmp(d, before[i]) && changed++ < 5) printf("     %s: \"%s\" -> \"%s\"\n", PARAMS[i].key, before[i], d);
+    }
+    CHECK(!changed, "MPC's STOP toggle of parameter 0 (%s to the far end and back) changes nothing, %d knobs moved (%d changed)",
+          PARAMS[0].key, moved, changed);
+    c->d(c, 1, 0, 0, 0, 0);
 }
 
 int main(void) {
@@ -198,6 +394,14 @@ int main(void) {
         a->setP(a, cont, 0.25f); a->d(a, 7, cont, 0, d, 0);
         CHECK(fabsf(a->getP(a, cont) - 0.25f) <= tol, "set %s 0.25 -> get %.3f (\"%s\")", PARAMS[cont].key, a->getP(a, cont), d);
         CHECK(fabsf(b->getP(b, cont) - 0.25f) > 1e-4f || PARAMS[cont].def == 0.25f, "instance b unaffected");
+        /* a host write (automation, a Q-Link) asks for no UpdateDisplay of its own: MPC rebuilds its parameter screen on
+         * each one (docs/NOTES.md, 2026-10-21). Polled readouts that show the value may still ask, at most every 100 ms. */
+        if (!PARAMS[cont].refresh_display) {
+            run(a, 40); updates = 0;
+            for (int k = 0; k < 32; k++) { a->setP(a, cont, (k & 1) ? 0.3f : 0.7f); run(a, 1); }
+            CHECK(updates <= 2, "32 host writes of %s over 4096 frames: %d UpdateDisplay(s) (want at most the 100 ms poll's)",
+                  PARAMS[cont].key, updates);
+        }
     }
     if (en >= 0) {
         int n = PARAMS[en].nopts;
@@ -284,6 +488,13 @@ int main(void) {
         CHECK(a->getP(a, pop) > 0.5f && !automated[pop], "Q-Link nudge leaves it open");
         a->setP(a, t, 1.0f); run(a, 1);
         CHECK(a->getP(a, pop) < 0.5f && automated[pop] == 1, "a pick closes it and tells the host once");
+        int pop2 = -1;
+        for (int i = pop + 1; i < NPARAMS && pop2 < 0; i++) if (PARAMS[i].popup_of >= 0) pop2 = i;
+        if (pop2 >= 0) {
+            a->setP(a, pop, 1); a->setP(a, pop2, 1); run(a, 1);
+            CHECK(a->getP(a, pop2) > 0.5f && a->getP(a, pop) < 0.5f, "opening a second popup closes the first (%s, %s)", PARAMS[pop].key, PARAMS[pop2].key);
+            a->setP(a, pop2, 0); run(a, 1);
+        }
     }
 
     ME m = {1, sizeof(ME), 0, 0, 0, 0, {0x90, 60, 100, 0}}; EV ev = {1, 0, {&m, 0}};
@@ -316,6 +527,10 @@ int main(void) {
 #if defined(HAS_TRANSPORT) && HAS_TRANSPORT
     transport_tests();
 #endif
+#if defined(HAS_SONG_POS) && HAS_SONG_POS
+    song_pos_tests();
+#endif
+    param0_toggle_check();
     step_of_option_tests(a);
     void *ch = 0; intptr_t n = a->d(a, 23, 0, 0, &ch, 0);
     if (n > 0) {
@@ -326,6 +541,12 @@ int main(void) {
         if (pop >= 0) CHECK(!strstr((char *)ch, PARAMS[pop].key), "popup flag not saved in the chunk");
     } else printf("warn no chunk (engine has no \"state\" param)\n");
 
+    program_tests(a);
+    cc_tests(a);
+#ifdef SELFSET_PROBE
+    selfset_tests();
+#endif
+    two_thread_tests(a);
     a->d(a, 1, 0, 0, 0, 0); b->d(b, 1, 0, 0, 0, 0);
     printf("%s\n", fails ? "FAILED" : "PASSED");
     return fails ? 1 : 0;
