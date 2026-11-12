@@ -6,6 +6,13 @@
   "date": "2026-10-10"
  },
  {
+  "version": "0.9.2",
+  "device": "Akai Force",
+  "firmware": "MPC OS 3.9.1",
+  "date": "2026-10-23",
+  "note": "Gen1 (armv7) build; the Gen2 build is untested."
+ },
+ {
   "version": "1.0.0",
   "device": "MPC Live III (Gen2)",
   "firmware": "",
