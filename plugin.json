@@ -1,0 +1,16 @@
+{
+  "name": "Lucky Dip",
+  "manufacturer": "sd88me",
+  "version": "1.0.0",
+  "kind": "instrument",
+  "uid": "LkDp",
+  "numInputs": 0,
+  "numOutputs": 2,
+  "category": "Drums",
+  "file32": "VST/luckydip-arm32.so",
+  "file64": "VST/luckydip-arm64.so",
+  "description": "A random drum-kit builder: scans your sample folders, fills 16 pads at random, lets you lock, reroll and export the kit as an MPC drum program.",
+  "author": "sd88me",
+  "url": "https://github.com/sd88me/mpc-vst-luckydip",
+  "license": "MIT"
+}

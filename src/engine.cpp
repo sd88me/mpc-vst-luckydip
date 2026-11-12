@@ -48,7 +48,7 @@ struct Shared {
     std::string prefs_path;
     Shared() : lib(new Library) { lib->rebuild(); }
 };
-Shared &shared() { static Shared s; return s; }
+Shared &shared() { static Shared &s = *new Shared; return s; }   /* never destroyed: a static destructor crashes at dlclose in the zig/libc++ build */
 
 struct Config {
     ScanOpts scan;
@@ -62,6 +62,52 @@ std::string trim(const std::string &s) {
     return s.substr(a, e - a);
 }
 bool is_dir(const std::string &p) { struct stat s; return stat(p.c_str(), &s) == 0 && S_ISDIR(s.st_mode); }
+
+/* The user's drives on any MPC OS standalone unit, from /proc/mounts: every writable disk filesystem (cards, USB sticks, the
+ * internal drive) mounted under /media, /mnt, /run/media, /nvme or /sdcard, minus the system's own mounts. Force / Gen1: /media/<card>
+ * and /media/az01-internal-sd (+ /sdcard); Live III / Gen2: /nvme (+ plugged-in sticks under /media). Two paths for one place (a
+ * bind mount, /sdcard as a link) are kept once, by their real path. Without /proc/mounts the folders under /media are used. */
+std::vector<std::string> user_drives() {
+    static const char *const FS[] = {"vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext4", "ext3", "ext2", "f2fs", "hfsplus", "msdos"};
+    static const char *const SYS[] = {"acvs-synths", "az01-internal"};
+    std::vector<std::string> out, real;
+    auto add = [&](const std::string &d) {
+        std::string b = base_name(d);
+        for (size_t i = 0; i < sizeof SYS / sizeof *SYS; i++) if (b == SYS[i]) return;
+        if (!is_dir(d)) return;
+        char rp[4096];
+        std::string r = realpath(d.c_str(), rp) ? std::string(rp) : d;
+        for (size_t i = 0; i < real.size(); i++) if (real[i] == r) return;
+        real.push_back(r); out.push_back(d);
+    };
+    FILE *f = fopen("/proc/mounts", "r");
+    if (f) {
+        char dev[512], mnt[1024], fs[64], opt[1024];
+        while (fscanf(f, "%511s %1023s %63s %1023s %*d %*d", dev, mnt, fs, opt) == 4) {
+            bool disk = false;
+            for (size_t i = 0; i < sizeof FS / sizeof *FS; i++) if (!strcmp(fs, FS[i])) disk = true;
+            if (!disk || strncmp(opt, "rw", 2) || (opt[2] && opt[2] != ',')) continue;
+            std::string m;
+            for (const char *c = mnt; *c; c++) {     /* /proc/mounts writes a space as \040 */
+                if (c[0] == '\\' && c[1] >= '0' && c[1] <= '7' && c[2] && c[3]) { m += (char)strtol(std::string(c + 1, 3).c_str(), 0, 8); c += 3; }
+                else m += *c;
+            }
+            if (m.compare(0, 7, "/media/") == 0 || m.compare(0, 5, "/mnt/") == 0 || m.compare(0, 11, "/run/media/") == 0 ||
+                m == "/nvme" || m == "/sdcard")
+                add(m);
+        }
+        fclose(f);
+    }
+    {   /* folders under /media that are not mount points themselves (older firmware links cards there) */
+        DIR *d = opendir("/media");
+        std::vector<std::string> v;
+        if (d) { while (struct dirent *e = readdir(d)) if (e->d_name[0] != '.') v.push_back(std::string("/media/") + e->d_name); closedir(d); }
+        std::sort(v.begin(), v.end());
+        for (size_t i = 0; i < v.size(); i++) add(v[i]);
+    }
+    if (is_dir("/sdcard")) add("/sdcard");
+    return out;
+}
 
 /* <data_dir>/luckydip.conf: root=<dir> (repeatable), export_dir=<dir>, skip_loops=0|1, max_mb=<n>,
  * classify_filenames=0|1. Without any root=, the usual card layout is searched (/media/<card>/Expansions etc.). */
@@ -86,22 +132,16 @@ Config load_config(const std::string &data_dir) {
         fclose(f);
     }
     if (c.scan.roots.empty()) {
-        DIR *d = opendir("/media");
-        std::vector<std::string> cards;
-        if (d) {
-            while (struct dirent *e = readdir(d)) if (e->d_name[0] != '.') cards.push_back(std::string("/media/") + e->d_name);
-            closedir(d);
-        }
-        std::sort(cards.begin(), cards.end());
+        std::vector<std::string> drives = user_drives();
         const char *const subs[] = {"Expansions", "Samples"};
-        for (size_t i = 0; i < cards.size(); i++)
+        for (size_t i = 0; i < drives.size(); i++)
             for (size_t k = 0; k < 2; k++)
-                if (is_dir(cards[i] + "/" + subs[k])) c.scan.roots.push_back(cards[i] + "/" + subs[k]);
-        if (is_dir("/sdcard/Samples")) c.scan.roots.push_back("/sdcard/Samples");
+                if (is_dir(drives[i] + "/" + subs[k])) c.scan.roots.push_back(drives[i] + "/" + subs[k]);
     }
     if (c.export_dir.empty()) {
         std::string force = "/media/az01-internal-sd/Expansions/Kits & Patterns";   /* where a Force browses kits */
-        c.export_dir = is_dir(force) ? force : data_dir + "/kits";
+        std::string live3 = "/nvme/MPC Documents";                                   /* the Live III's own documents folder */
+        c.export_dir = is_dir(force) ? force : is_dir(live3) ? live3 + "/Lucky Dip" : data_dir + "/kits";
     }
     return c;
 }
@@ -311,7 +351,7 @@ struct Inst {
             Job j; bool have = false;
             {
                 std::unique_lock<std::mutex> l(jmu);
-                if (jobs.empty() && !stop) jcv.wait_for(l, std::chrono::seconds(2));
+                if (jobs.empty() && !stop) jcv.wait_until(l, std::chrono::system_clock::now() + std::chrono::seconds(2));   /* not wait_for: libc++ makes that pthread_cond_clockwait (glibc 2.30, newer than the Force) */
                 if (stop) return;
                 if (!jobs.empty()) { j = jobs.front(); jobs.pop_front(); have = true; }
             }
@@ -353,18 +393,16 @@ struct Inst {
      * subfolders (so each pack inside Expansions is a second-level choice, not one more step in a flat list) */
     static void discover_dirs(std::vector<std::string> &locs, std::vector<std::vector<std::string> > &subs) {
         std::vector<std::string> top;
-        std::vector<std::string> cards;
-        subdirs("/media", cards);
-        for (size_t c = 0; c < cards.size(); c++) {
-            std::string nm = base_name(cards[c]);
-            if (nm == "acvs-synths" || nm == "az01-internal") continue;     /* system mounts, not sample cards */
-            subdirs(cards[c], top);
-        }
-        std::vector<std::string> sd;
-        subdirs("/sdcard", sd);
-        for (size_t i = 0; i < sd.size(); i++) {
-            std::string nm = base_name(sd[i]);
-            if (nm != "Synths" && nm != "MPC-backup") top.push_back(sd[i]);
+        std::vector<std::string> drives = user_drives();
+        for (size_t c = 0; c < drives.size(); c++) {
+            std::vector<std::string> v;
+            subdirs(drives[c], v);
+            for (size_t i = 0; i < v.size(); i++) {      /* plugin, system and recycle folders are not sample places */
+                std::string nm = base_name(v[i]);
+                if (nm == "VST2 Plugins" || nm.compare(0, 6, "Synths") == 0 || nm == "MPC-backup" || nm[0] == '$' ||
+                    nm == "System Volume Information" || nm == "lost+found") continue;
+                top.push_back(v[i]);
+            }
         }
         locs.assign(1, std::string()); subs.assign(1, std::vector<std::string>(1, std::string()));
         for (size_t i = 0; i < top.size() && i < 60; i++) {
@@ -390,13 +428,42 @@ struct Inst {
         cfg.export_dir = ep.empty() ? def_export : ep;
         cfg.scan.max_bytes = (int64_t)SIZE_MB[size_idx] * 1024 * 1024;
     }
+    /* A location as a person reads it: "<drive> / <path>" (Internal = the Live III's drive, Internal SD = the Force's, a card or
+     * stick by its name); a long one keeps its end. */
     static std::string folder_label(const std::string &p, const char *dflt, size_t max) {
         if (p.empty()) return dflt;
-        std::string s = p;
-        if (s.compare(0, 7, "/media/") == 0) s = s.substr(7);
-        else if (s.compare(0, 1, "/") == 0) s = s.substr(1);
-        if (s.size() > max) s = "~" + s.substr(s.size() - (max - 1));
-        return s;
+        static const char *const pre[][2] = {{"/nvme", "Internal"}, {"/media/az01-internal-sd", "Internal SD"}, {"/sdcard", "SD card"}};
+        std::string drive, rest;
+        for (size_t i = 0; i < sizeof pre / sizeof *pre && drive.empty(); i++) {
+            size_t n = strlen(pre[i][0]);
+            if (p.compare(0, n, pre[i][0]) == 0 && (p.size() == n || p[n] == '/')) { drive = pre[i][1]; rest = p.size() > n ? p.substr(n + 1) : ""; }
+        }
+        if (drive.empty() && p.compare(0, 7, "/media/") == 0) {
+            size_t e = p.find('/', 7);
+            drive = p.substr(7, e == std::string::npos ? std::string::npos : e - 7);
+            rest = e == std::string::npos ? "" : p.substr(e + 1);
+        }
+        if (drive.empty()) { drive = ""; rest = p[0] == '/' ? p.substr(1) : p; }
+        std::vector<std::string> parts;
+        if (!drive.empty()) parts.push_back(drive);
+        for (size_t a = 0; a <= rest.size();) {
+            size_t b = rest.find('/', a);
+            if (b == std::string::npos) b = rest.size();
+            if (b > a) parts.push_back(rest.substr(a, b - a));
+            a = b + 1;
+        }
+        std::string s;
+        for (size_t i = 0; i < parts.size(); i++) s += (i ? " / " : "") + parts[i];
+        if (s.size() <= max || parts.size() < 2) return s.size() <= max ? s : "~" + s.substr(s.size() - (max - 1));
+        /* too long: the drive, "...", and as many of the deepest folders as fit */
+        std::string tail = parts.back();
+        for (size_t i = parts.size() - 1; i-- > 1;) {
+            std::string t = parts[i] + " / " + tail;
+            if (parts[0].size() + 7 + t.size() > max) break;
+            tail = t;
+        }
+        s = parts[0] + " / ... / " + tail;
+        return s.size() <= max ? s : "~" + s.substr(s.size() - (max - 1));
     }
     static std::string sub_label(const FolderSel &f) {
         if (f.loc <= 0) return "-";
@@ -408,6 +475,23 @@ struct Inst {
         return pre + nm;
     }
     /* which: 0 source location, 1 source inside, 2 export location, 3 export inside; d = steps */
+    /* The folder lists for a drawn pick-list (1.0): which = 0 source location, 1 source inside, 2 export location, 3 export inside. */
+    int folder_count_locked(int which) { FolderSel &f = which < 2 ? src : exp; return which % 2 == 0 ? (int)f.locs.size() : (int)f.subs[f.loc].size(); }
+    int folder_cur_locked(int which) { FolderSel &f = which < 2 ? src : exp; return which % 2 == 0 ? f.loc : f.sub; }
+    std::string folder_item_locked(int which, int i) {
+        FolderSel &f = which < 2 ? src : exp;
+        if (i < 0 || i >= folder_count_locked(which)) return "";
+        if (which % 2 == 0) return folder_label(f.locs[i], "Default (auto)", 34);
+        return i == 0 ? std::string("(whole folder)") : base_name(f.subs[f.loc][i]);
+    }
+    void pick_folder(int which, int i) {
+        std::lock_guard<std::mutex> l(mu);
+        FolderSel &f = which < 2 ? src : exp;
+        if (i < 0 || i >= folder_count_locked(which)) return;
+        if (which % 2 == 0) { f.loc = i; f.sub = 0; } else f.sub = i;
+        apply_folders_locked();
+        status = which < 2 ? "Source set: 'RESCAN'" : "Export folder set";
+    }
     void step_folder(int which, int d) {
         std::lock_guard<std::mutex> l(mu);
         FolderSel &f = which < 2 ? src : exp;
@@ -727,6 +811,7 @@ void e_set_param(void *h, const char *key, const char *val) {
             return;
         }
     }
+    if (!strncmp(key, "fl_pick:", 8)) { in->pick_folder(atoi(key + 8), atoi(val)); return; }
     if (!strcmp(key, "export_mode")) { std::lock_guard<std::mutex> l(in->mu); in->link_samples = atoi(val) == 1; return; }
     if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "'RESCAN' to apply"; return; }
     if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "'RESCAN' to apply"; return; }
@@ -787,8 +872,14 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
     }
     std::unique_lock<std::mutex> l(in->mu, std::defer_lock);
     if (audio) { if (!l.try_lock()) return 0; } else l.lock();
-    if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 23));
-    if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 23));
+    if (!strncmp(key, "fl_count:", 9)) return put(buf, n, std::to_string(in->folder_count_locked(atoi(key + 9) & 3)));
+    if (!strncmp(key, "fl_cur:", 7)) return put(buf, n, std::to_string(in->folder_cur_locked(atoi(key + 7) & 3)));
+    if (!strncmp(key, "fl_item:", 8)) {
+        const char *c2 = strchr(key + 8, ':');
+        return c2 ? put(buf, n, in->folder_item_locked(atoi(key + 8) & 3, atoi(c2 + 1))) : 0;
+    }
+    if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 44));
+    if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 44));
     if (!strcmp(key, "src_sub_name")) return put(buf, n, Inst::sub_label(in->src));
     if (!strcmp(key, "exp_sub_name")) return put(buf, n, Inst::sub_label(in->exp));
     if (!strncmp(key, "src_loc_", 8) || !strncmp(key, "src_sub_", 8) || !strncmp(key, "exp_loc_", 8) || !strncmp(key, "exp_sub_", 8)) return put(buf, n, "0");   /* triggers */
@@ -865,7 +956,7 @@ void e_render(void *h, int16_t *out, int frames) {
     for (int i = n * 2; i < frames * 2; i++) out[i] = 0;
 }
 
-const mpc_engine_t ENGINE = {e_create, e_destroy, e_midi, e_set_param, e_get_param, e_render, 0};
+const mpc_engine_t ENGINE = {e_create, e_destroy, e_midi, e_set_param, e_get_param, e_render, 0, 0};
 
 }  // namespace
 
