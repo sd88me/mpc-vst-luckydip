@@ -259,82 +259,116 @@ def confetti(c, box, n, seed, alpha=(90, 150), cols=None):
 
 
 # ---- parts ---------------------------------------------------------------------------------------------------------------------
-def card(c, box, title=None, candy="violet", r=22, badge=True, inner_top=40, sprinkles=False):
-    """A 0.9 tile / panel: a candy gradient with a white rim, a glossy top sheen, the title in white with a dark outline, a darker
-    inner panel below the title and the swirl badge at the top right."""
+# Shapes from the round-1 redesign (soft cards, keys with a side wall), colours from 0.9. Text wells: LD_WELL = cream | tone | glass.
+WELL_STYLE = os.environ.get("LD_WELL", "tone")
+
+
+def lum(c):
+    return 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2]
+
+
+def ink_on(c):
+    """Dark grape on light candy (yellow, mint, teal...), white on the rest."""
+    return GRAPE if lum(c) > 170 else WHITE
+
+
+def card(c, box, title=None, candy="violet", r=16, badge=True, inner_top=40, sprinkles=False):
+    """A candy card: a soft drop shadow, a gentle top-to-bottom gradient, a thin light rim and a top highlight; the title in white,
+    letter-spaced, with a soft shadow; the 0.9 swirl badge at the top right."""
     x0, y0, x1, y1 = box
     top, bot = CANDY[candy]
-    c.blurred(lambda d, s: d.rounded_rectangle([x0 * s, (y0 + 4) * s, x1 * s, (y1 + 4) * s], r * s, fill=(20, 4, 44, 150)), 4)
-    c.vgrad(box, top, bot, r)
-    c.rect(box, r, outline=rgba(WHITE), width=3)
-    c.rect((x0 + 7, y0 + inner_top, x1 - 7, y1 - 7), max(8, r - 8), fill=rgba(WELL, 87))
-    c.blurred(lambda d, s: d.ellipse([(x0 + 22) * s, (y0 + 4) * s, (x0 + min((x1 - x0) * 0.62, 240)) * s, (y0 + 20) * s], fill=(255, 255, 255, 110)), 1.5)
+    c.blurred(lambda d, s: d.rounded_rectangle([x0 * s, (y0 + 5) * s, x1 * s, (y1 + 5) * s], r * s, fill=(20, 4, 44, 140)), 6)
+    c.vgrad(box, mix(top, WHITE, 0.06), mix(bot, (0, 0, 0), 0.06), r)
+    c.vgrad((x0 + 2, y0 + 2, x1 - 2, y0 + inner_top), WHITE, top, r - 2, alpha=34)
+    c.rect(box, r, outline=rgba(WHITE, 150), width=1.5)
+    c.line([(x0 + r, y0 + 1.5), (x1 - r, y0 + 1.5)], rgba(WHITE, 110), 1.2)
     if sprinkles:
-        confetti(c, (x0 + 30, y1 - 22, x1 - 30, y1 - 10), max(2, int((x1 - x0) / 80)), seed=int(x0 * 7 + y0), alpha=(90, 130), cols=[WHITE])
+        confetti(c, (x0 + 30, y1 - 16, x1 - 30, y1 - 8), max(2, int((x1 - x0) / 90)), seed=int(x0 * 7 + y0), alpha=(70, 110), cols=[WHITE])
     if title:
-        caption(c, (x0 + 18, y0 + inner_top / 2 + 1), title, 21, anchor="lm", spacing=2)
+        tc = ink_on(top)
+        sh = (0, 0, 0, 70) if tc == WHITE else (255, 255, 255, 90)
+        c.text((x0 + 17, y0 + inner_top / 2 + 2), title, 17, sh, anchor="lm", spacing=1.6)
+        c.text((x0 + 16, y0 + inner_top / 2 + 1), title, 17, rgba(tc), anchor="lm", spacing=1.6)
     if badge:
-        swirl(c, x1 - 26, y0 + inner_top / 2 + 1, 13)
+        swirl(c, x1 - 24, y0 + inner_top / 2 + 1, 12)
 
 
-def well(c, box, r=10):
-    """A rounded dark well for live text: #1d0a3d with a half-white rim (the 0.9 .box)."""
+def well(c, box, r=10, candy="violet"):
+    """A text well in the chosen style."""
     x0, y0, x1, y1 = box
-    c.rect(box, r, fill=rgba(WELL), outline=rgba(WHITE, 140), width=1.5)
-    c.vgrad((x0 + 2, y0 + 2, x1 - 2, y0 + 7), (0, 0, 0), WELL, r, alpha=90)
+    top, bot = CANDY[candy]
+    if WELL_STYLE == "cream":
+        c.rect(box, r, fill=rgba(mix(CREAM, top, 0.10)), outline=rgba(mix(bot, (0, 0, 0), 0.25), 160), width=1.2)
+        c.vgrad((x0 + 1.5, y0 + 1.5, x1 - 1.5, y0 + 8), mix(bot, (0, 0, 0), 0.3), CREAM, r, alpha=70)
+        c.line([(x0 + r, y1 - 1), (x1 - r, y1 - 1)], rgba(WHITE, 160), 1)
+    elif WELL_STYLE == "tone":
+        deep = mix(bot, GRAPE_LO, 0.42)
+        c.rect(box, r, fill=rgba(deep), outline=rgba(mix(deep, (0, 0, 0), 0.25)), width=1)
+        c.vgrad((x0 + 1, y0 + 1, x1 - 1, y0 + 8), (0, 0, 0), deep, r, alpha=80)
+        c.line([(x0 + r, y1 - 0.5), (x1 - r, y1 - 0.5)], rgba(WHITE, 70), 1)
+    else:   # glass
+        c.rect(box, r, fill=(255, 255, 255, 46), outline=rgba(WHITE, 120), width=1.2)
+        c.vgrad((x0 + 1, y0 + 1, x1 - 1, y0 + (y1 - y0) * 0.45), WHITE, WHITE, r, alpha=26)
+
+
+def well_text(candy="violet"):
+    """The live text colour that goes with well()."""
+    if WELL_STYLE == "cream":
+        return GRAPE
+    if WELL_STYLE == "tone":
+        return WHITE
+    return WHITE if lum(CANDY[candy][1]) < 175 else GRAPE
+
+
+def well_dim(candy="violet"):
+    if WELL_STYLE == "cream":
+        return mix(GRAPE, CREAM, 0.45)
+    return mix(well_text(candy), CANDY[candy][0], 0.45)
 
 
 def key(w, h, cap="", icon_name=None, candy="pink", state="off", px=15, toggle=False):
-    """A 0.9 pill key image (w x h + 6 px for the drop shadow). Momentaries: candy face, white rim, gloss; pressed = darker and sunk.
-    Toggles: off = a dark grape pill with lavender caption; on = the candy (or mint) pill, lit, with a glow."""
+    """A key image (w x h + 6 px for the side wall), the round-1 shape in 0.9 colours. Momentaries: candy cap; pressed = sunk and
+    darker. Toggles: off = a grape cap with the caption and icon in the key's candy; on = the candy cap with a glow ring."""
     c = Canvas(w, h + 6)
-    r = min(22, h / 2)
+    r = 10
     dy = 3 if state == "pressed" else 0
     lit = not toggle or state == "on"
+    top, bot = CANDY[candy]
     if lit:
-        top, bot = CANDY[candy]
+        ft, fb = mix(top, WHITE, 0.12), bot
         if state == "pressed":
-            top, bot = mix(top, (0, 0, 0), 0.2), mix(bot, (0, 0, 0), 0.2)
+            ft, fb = mix(ft, (0, 0, 0), 0.18), mix(fb, (0, 0, 0), 0.18)
     else:
-        top, bot = mix(GRAPE, WELL, 0.2), WELL
-    # drop shadow (0 3px rgba(40,8,80,.55)) and glow for a lit toggle
-    if state != "pressed":
-        c.rect((1.5, 4.5, w - 1.5, h + 4.5), r, fill=(40, 8, 80, 140))
+        ft, fb = mix(GRAPE_HI, VIOLET, 0.35), mix(GRAPE, GRAPE_LO, 0.3)
+    wall = mix(fb, (0, 0, 0), 0.45)
+    c.rect((1, 4, w - 1, h + 5), r, fill=rgba(wall))
+    c.vgrad((1, 1 + dy, w - 1, h + 1 + dy), ft, fb, r)
+    c.vgrad((3, 2 + dy, w - 3, 2 + dy + h * 0.45), WHITE, ft, r - 2, alpha=40 if lit else 18)
+    c.rect((1, 1 + dy, w - 1, h + 1 + dy), r, outline=rgba(WHITE, 90 if lit else 50), width=1)
     if toggle and state == "on":
-        c.blurred(lambda d, s: d.rounded_rectangle([3 * s, 3 * s, (w - 3) * s, (h - 1) * s], r * s, outline=rgba(top, 210), width=int(4 * s)), 2.5)
-    c.vgrad((1.5, 1.5 + dy, w - 1.5, h - 0.5 + dy), top, bot, r)
-    if lit:   # gloss over the top half
-        c.vgrad((5, 3 + dy, w - 5, 3 + dy + h * 0.42), WHITE, mix(top, WHITE, 0.4), r * 0.8, alpha=70)
-    rim = WHITE if lit else mix(CANDY[candy][0], WHITE, 0.15)
-    c.rect((1.5, 1.5 + dy, w - 1.5, h - 0.5 + dy), r, outline=rgba(rim, 255 if lit else 200), width=2.5)
+        c.rect((1, 1 + dy, w - 1, h + 1 + dy), r, outline=rgba(mix(top, WHITE, 0.55), 230), width=2)
+    if lit:
+        fill = ink_on(ft)
+        icol = fill
+    else:
+        fill = mix(top, WHITE, 0.25)
+        icol = top
     cy = 1 + dy + h / 2
-    fill = WHITE if lit else mix(CANDY[candy][0], LAVENDER, 0.45)
-    icol = rgba(WHITE) if lit else rgba(mix(CANDY[candy][0], LAV_DIM, 0.4))
     if icon_name and cap:
         iw = px * 1.1
-        tw = c.textw(cap, px, spacing=px * 0.1)
+        tw = c.textw(cap, px, spacing=px * 0.06)
         x = w / 2 - (iw + 8 + tw) / 2
-        if lit:
-            icon(c, icon_name, x + iw / 2 + 0.8, cy + 0.8, iw, rgba(OUTLINE, 150))
-        icon(c, icon_name, x + iw / 2, cy, iw, icol)
-        if lit:
-            caption(c, (x + iw + 8, cy + 1), cap, px, anchor="lm", spacing=px * 0.1, fill=fill)
-        else:
-            c.text((x + iw + 8, cy + 1), cap, px, rgba(fill), anchor="lm", spacing=px * 0.1)
+        icon(c, icon_name, x + iw / 2, cy, iw, rgba(icol))
+        c.text((x + iw + 8, cy + 1), cap, px, rgba(fill), anchor="lm", spacing=px * 0.06)
     elif icon_name:
-        if lit:
-            icon(c, icon_name, w / 2 + 1, cy + 1, min(w, h) * 0.5, rgba(OUTLINE, 150))
-        icon(c, icon_name, w / 2, cy, min(w, h) * 0.5, icol)
+        icon(c, icon_name, w / 2, cy, min(w, h) * 0.5, rgba(icol))
     elif cap:
-        if lit:
-            caption(c, (w / 2, cy + 1), cap, px, spacing=px * 0.1, fill=fill)
-        else:
-            c.text((w / 2, cy + 1), cap, px, rgba(fill), spacing=px * 0.1)
+        c.text((w / 2, cy + 1), cap, px, rgba(fill), spacing=px * 0.06)
     return c.image()
 
 
 def seg(w, h, cap, candy="pink", lit=False, px=15):
-    """One segment of a lit choice (a radio group): a dark pill, or the candy pill when it is the current value."""
+    """One segment of a lit choice (a radio group)."""
     return key(w, h - 6, cap, None, candy, "on" if lit else "off", px, toggle=True)
 
 
@@ -361,29 +395,28 @@ def slider_strip(w, h, frames):
     return strip
 
 
-def kind_strip(w, h, big=False):
-    """What a pad holds, one frame per kind (0 empty, 1..23 category, 24 missing): a dark well pill with the category in gold and a
-    candy chip of its family on the left (red with "!" when the sample is missing)."""
+def kind_strip(w, h, big=False, candy="violet"):
+    """What a pad holds, one frame per kind (0 empty, 1..23 category, 24 missing): a pill in the well style with a candy chip of the
+    category's family and its name (red with "!" when the sample is missing)."""
     frames = 25
     strip = Image.new("RGBA", (w, h * frames), (0, 0, 0, 0))
     for k in range(frames):
         c = Canvas(w, h)
         if k == 0:
-            cap, candy = "EMPTY", None
+            cap, chip = "EMPTY", None
         elif k == 24:
-            cap, candy = "MISSING!", "red"
+            cap, chip = "MISSING!", "red"
         else:
-            cap, candy = CATS[k - 1][0], FAMILY[CATS[k - 1][1]]
-        c.rect((0.75, 0.75, w - 0.75, h - 0.75), h / 2 - 1, fill=rgba(WELL), outline=rgba(WHITE, 140), width=1.5)
+            cap, chip = CATS[k - 1][0], FAMILY[CATS[k - 1][1]]
+        well(c, (0.75, 0.75, w - 0.75, h - 0.75), h / 2 - 1, candy)
         d = h - 12
-        if candy:
-            top, bot = CANDY[candy]
+        if chip:
+            top, bot = CANDY[chip]
             c.vgrad((6, 6, 6 + d, 6 + d), top, bot, d / 2)
-            c.ellipse((6, 6, 6 + d, 6 + d), outline=rgba(WHITE, 200), width=1.2)
+            c.ellipse((6, 6, 6 + d, 6 + d), outline=rgba(WHITE, 220), width=1.2)
         else:
-            c.ellipse((6, 6, 6 + d, 6 + d), outline=rgba(LAV_DIM), width=1.5)
-        px = 19 if big else 15
-        c.text((14 + d, h / 2 + 1), cap, px, rgba(GOLD if k else LAV_DIM), anchor="lm", spacing=1.2)
+            c.ellipse((6, 6, 6 + d, 6 + d), outline=rgba(well_dim(candy)), width=1.5)
+        c.text((14 + d, h / 2 + 1), cap, 19 if big else 15, rgba(well_text(candy) if k else well_dim(candy)), anchor="lm", spacing=1.2)
         strip.alpha_composite(c.image(), (0, k * h))
     return strip
 
