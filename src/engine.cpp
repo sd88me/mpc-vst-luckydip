@@ -48,7 +48,7 @@ struct Shared {
     std::string prefs_path;
     Shared() : lib(new Library) { lib->rebuild(); }
 };
-Shared &shared() { static Shared s; return s; }
+Shared &shared() { static Shared &s = *new Shared; return s; }   /* never destroyed: a static destructor crashes at dlclose in the zig/libc++ build */
 
 struct Config {
     ScanOpts scan;
@@ -62,6 +62,52 @@ std::string trim(const std::string &s) {
     return s.substr(a, e - a);
 }
 bool is_dir(const std::string &p) { struct stat s; return stat(p.c_str(), &s) == 0 && S_ISDIR(s.st_mode); }
+
+/* The user's drives on any MPC OS standalone unit, from /proc/mounts: every writable disk filesystem (cards, USB sticks, the
+ * internal drive) mounted under /media, /mnt, /run/media, /nvme or /sdcard, minus the system's own mounts. Force / Gen1: /media/<card>
+ * and /media/az01-internal-sd (+ /sdcard); Live III / Gen2: /nvme (+ plugged-in sticks under /media). Two paths for one place (a
+ * bind mount, /sdcard as a link) are kept once, by their real path. Without /proc/mounts the folders under /media are used. */
+std::vector<std::string> user_drives() {
+    static const char *const FS[] = {"vfat", "exfat", "ntfs", "ntfs3", "fuseblk", "ext4", "ext3", "ext2", "f2fs", "hfsplus", "msdos"};
+    static const char *const SYS[] = {"acvs-synths", "az01-internal"};
+    std::vector<std::string> out, real;
+    auto add = [&](const std::string &d) {
+        std::string b = base_name(d);
+        for (size_t i = 0; i < sizeof SYS / sizeof *SYS; i++) if (b == SYS[i]) return;
+        if (!is_dir(d)) return;
+        char rp[4096];
+        std::string r = realpath(d.c_str(), rp) ? std::string(rp) : d;
+        for (size_t i = 0; i < real.size(); i++) if (real[i] == r) return;
+        real.push_back(r); out.push_back(d);
+    };
+    FILE *f = fopen("/proc/mounts", "r");
+    if (f) {
+        char dev[512], mnt[1024], fs[64], opt[1024];
+        while (fscanf(f, "%511s %1023s %63s %1023s %*d %*d", dev, mnt, fs, opt) == 4) {
+            bool disk = false;
+            for (size_t i = 0; i < sizeof FS / sizeof *FS; i++) if (!strcmp(fs, FS[i])) disk = true;
+            if (!disk || strncmp(opt, "rw", 2) || (opt[2] && opt[2] != ',')) continue;
+            std::string m;
+            for (const char *c = mnt; *c; c++) {     /* /proc/mounts writes a space as \040 */
+                if (c[0] == '\\' && c[1] >= '0' && c[1] <= '7' && c[2] && c[3]) { m += (char)strtol(std::string(c + 1, 3).c_str(), 0, 8); c += 3; }
+                else m += *c;
+            }
+            if (m.compare(0, 7, "/media/") == 0 || m.compare(0, 5, "/mnt/") == 0 || m.compare(0, 11, "/run/media/") == 0 ||
+                m == "/nvme" || m == "/sdcard")
+                add(m);
+        }
+        fclose(f);
+    }
+    {   /* folders under /media that are not mount points themselves (older firmware links cards there) */
+        DIR *d = opendir("/media");
+        std::vector<std::string> v;
+        if (d) { while (struct dirent *e = readdir(d)) if (e->d_name[0] != '.') v.push_back(std::string("/media/") + e->d_name); closedir(d); }
+        std::sort(v.begin(), v.end());
+        for (size_t i = 0; i < v.size(); i++) add(v[i]);
+    }
+    if (is_dir("/sdcard")) add("/sdcard");
+    return out;
+}
 
 /* <data_dir>/luckydip.conf: root=<dir> (repeatable), export_dir=<dir>, skip_loops=0|1, max_mb=<n>,
  * classify_filenames=0|1. Without any root=, the usual card layout is searched (/media/<card>/Expansions etc.). */
@@ -86,22 +132,16 @@ Config load_config(const std::string &data_dir) {
         fclose(f);
     }
     if (c.scan.roots.empty()) {
-        DIR *d = opendir("/media");
-        std::vector<std::string> cards;
-        if (d) {
-            while (struct dirent *e = readdir(d)) if (e->d_name[0] != '.') cards.push_back(std::string("/media/") + e->d_name);
-            closedir(d);
-        }
-        std::sort(cards.begin(), cards.end());
+        std::vector<std::string> drives = user_drives();
         const char *const subs[] = {"Expansions", "Samples"};
-        for (size_t i = 0; i < cards.size(); i++)
+        for (size_t i = 0; i < drives.size(); i++)
             for (size_t k = 0; k < 2; k++)
-                if (is_dir(cards[i] + "/" + subs[k])) c.scan.roots.push_back(cards[i] + "/" + subs[k]);
-        if (is_dir("/sdcard/Samples")) c.scan.roots.push_back("/sdcard/Samples");
+                if (is_dir(drives[i] + "/" + subs[k])) c.scan.roots.push_back(drives[i] + "/" + subs[k]);
     }
     if (c.export_dir.empty()) {
         std::string force = "/media/az01-internal-sd/Expansions/Kits & Patterns";   /* where a Force browses kits */
-        c.export_dir = is_dir(force) ? force : data_dir + "/kits";
+        std::string live3 = "/nvme/MPC Documents";                                   /* the Live III's own documents folder */
+        c.export_dir = is_dir(force) ? force : is_dir(live3) ? live3 + "/Lucky Dip" : data_dir + "/kits";
     }
     return c;
 }
@@ -311,7 +351,7 @@ struct Inst {
             Job j; bool have = false;
             {
                 std::unique_lock<std::mutex> l(jmu);
-                if (jobs.empty() && !stop) jcv.wait_for(l, std::chrono::seconds(2));
+                if (jobs.empty() && !stop) jcv.wait_until(l, std::chrono::system_clock::now() + std::chrono::seconds(2));   /* not wait_for: libc++ makes that pthread_cond_clockwait (glibc 2.30, newer than the Force) */
                 if (stop) return;
                 if (!jobs.empty()) { j = jobs.front(); jobs.pop_front(); have = true; }
             }
@@ -353,18 +393,16 @@ struct Inst {
      * subfolders (so each pack inside Expansions is a second-level choice, not one more step in a flat list) */
     static void discover_dirs(std::vector<std::string> &locs, std::vector<std::vector<std::string> > &subs) {
         std::vector<std::string> top;
-        std::vector<std::string> cards;
-        subdirs("/media", cards);
-        for (size_t c = 0; c < cards.size(); c++) {
-            std::string nm = base_name(cards[c]);
-            if (nm == "acvs-synths" || nm == "az01-internal") continue;     /* system mounts, not sample cards */
-            subdirs(cards[c], top);
-        }
-        std::vector<std::string> sd;
-        subdirs("/sdcard", sd);
-        for (size_t i = 0; i < sd.size(); i++) {
-            std::string nm = base_name(sd[i]);
-            if (nm != "Synths" && nm != "MPC-backup") top.push_back(sd[i]);
+        std::vector<std::string> drives = user_drives();
+        for (size_t c = 0; c < drives.size(); c++) {
+            std::vector<std::string> v;
+            subdirs(drives[c], v);
+            for (size_t i = 0; i < v.size(); i++) {      /* plugin, system and recycle folders are not sample places */
+                std::string nm = base_name(v[i]);
+                if (nm == "VST2 Plugins" || nm.compare(0, 6, "Synths") == 0 || nm == "MPC-backup" || nm[0] == '$' ||
+                    nm == "System Volume Information" || nm == "lost+found") continue;
+                top.push_back(v[i]);
+            }
         }
         locs.assign(1, std::string()); subs.assign(1, std::vector<std::string>(1, std::string()));
         for (size_t i = 0; i < top.size() && i < 60; i++) {
@@ -394,6 +432,7 @@ struct Inst {
         if (p.empty()) return dflt;
         std::string s = p;
         if (s.compare(0, 7, "/media/") == 0) s = s.substr(7);
+        else if (s.compare(0, 6, "/nvme/") == 0) s = s.substr(6);     /* the Live III's drive: just the folder name */
         else if (s.compare(0, 1, "/") == 0) s = s.substr(1);
         if (s.size() > max) s = "~" + s.substr(s.size() - (max - 1));
         return s;
@@ -865,7 +904,7 @@ void e_render(void *h, int16_t *out, int frames) {
     for (int i = n * 2; i < frames * 2; i++) out[i] = 0;
 }
 
-const mpc_engine_t ENGINE = {e_create, e_destroy, e_midi, e_set_param, e_get_param, e_render, 0};
+const mpc_engine_t ENGINE = {e_create, e_destroy, e_midi, e_set_param, e_get_param, e_render, 0, 0};
 
 }  // namespace
 

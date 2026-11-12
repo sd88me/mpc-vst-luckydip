@@ -1,3 +1,5 @@
 vst/build/
 *.o
 dist/
+build/
+/luckydip/
