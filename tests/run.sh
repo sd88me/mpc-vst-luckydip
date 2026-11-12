@@ -3,12 +3,12 @@
 # LD_NAME / LD_UIDS: a beta build's name and uid (default: the release's).
 set -euo pipefail
 cd "$(dirname "$0")/.."
-SDK="${MPC_SDK:-$HOME/mpc-310-private/mpc-plugin-builder-sdk}"
+BUILDER="${MPC_BUILDER:?set MPC_BUILDER to the plugin builder checkout}"
 python3 tools/gen_params.py >/dev/null
 [ -f tests/data/legacy-0.9.2.chunk ] || tests/make_legacy_chunk.sh >/dev/null
 T=build/test; mkdir -p "$T"
 S="-fsanitize=address,undefined -fno-sanitize-recover=undefined -O1 -g -std=c++17 -pthread"
-g++ $S -Wall -DLD_TEST -DLD_EXPECT_NAME="\"${LD_NAME:-Lucky Dip}\"" -DLD_EXPECT_UID="\"${LD_UIDS:-LkDp}\"" -I"$SDK/framework" -Isrc \
+g++ $S -Wall -DLD_TEST -DLD_EXPECT_NAME="\"${LD_NAME:-Lucky Dip}\"" -DLD_EXPECT_UID="\"${LD_UIDS:-LkDp}\"" -I"$BUILDER/framework" -Isrc \
   -o "$T/ldtest" src/LuckyDipPlugin.cpp src/engine.cpp tests/host_test.cpp -lm
 pf="$(mktemp -d)"; trap 'rm -rf "$pf"' EXIT
 cp plugin.json "$pf/"

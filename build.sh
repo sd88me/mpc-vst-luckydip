@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
 # Build Lucky Dip 1.0 with the MPC plugin builder (tools/build.py, zig): native test build + arm32 (Force, MPC Gen1) + arm64 (Live III and
 # other 64-bit units), into build/"sd88me - VST - Lucky Dip"/. The 0.9 wrapper build is still vst/build.sh.
-#   ./build-sdk.sh          build
-#   ./build-sdk.sh test     build, the offline ASan/UBSan host test (tests/run.sh) and the builder's host_sim
-#   ./build-sdk.sh beta     a "Lucky Dip 2 Beta" (uid LkDB) build that installs next to the release: build/beta-project/build/...
-# MPC_SDK: the plugin builder checkout.
+#   ./build.sh          build
+#   ./build.sh test     build, the offline ASan/UBSan host test (tests/run.sh) and the builder's host_sim
+#   ./build.sh beta     a "Lucky Dip 2 Beta" (uid LkDB) build that installs next to the release: build/beta-project/build/...
+# MPC_BUILDER: the plugin builder checkout (tools/build.py, framework/).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
-SDK="${MPC_SDK:-$HOME/mpc-310-private/mpc-plugin-builder-sdk}"
-[ -f "$SDK/tools/build.py" ] || { echo "need the plugin builder (MPC_SDK)" >&2; exit 1; }
+BUILDER="${MPC_BUILDER:?set MPC_BUILDER to the plugin builder checkout}"
+[ -f "$BUILDER/tools/build.py" ] || { echo "need the plugin builder (MPC_BUILDER)" >&2; exit 1; }
 python3 "$here/tools/gen_params.py"
 [ -f "$here/tools/make_tui.py" ] && python3 "$here/tools/make_tui.py"
 
@@ -29,15 +29,15 @@ m = json.load(open(sys.argv[1]))
 m.update(name="Lucky Dip 2 Beta", uid="LkDB", file32="VST/luckydip2beta-arm32.so", file64="VST/luckydip2beta-arm64.so")
 json.dump(m, open(sys.argv[2], "w"), indent=2)
 PY
-  python3 "$SDK/tools/build.py" "$stage" --no-ui --define 'LD_NAME="Lucky Dip 2 Beta"' --define "LD_UID='L','k','D','B'"
+  python3 "$BUILDER/tools/build.py" "$stage" --no-ui --define 'LD_NAME="Lucky Dip 2 Beta"' --define "LD_UID='L','k','D','B'"
   glibc_check "$stage/build/sd88me - VST - Lucky Dip 2 Beta/VST/luckydip2beta-arm32.so"
   exit
 fi
-python3 "$SDK/tools/build.py" "$here" --no-ui
+python3 "$BUILDER/tools/build.py" "$here" --no-ui
 glibc_check "$here/build/sd88me - VST - Lucky Dip/VST/luckydip-arm32.so"
 if [ "${1:-}" = test ]; then
   "$here/tests/run.sh"
   scratch="$(mktemp -d)"; trap 'rm -rf "$scratch"' EXIT
   cp "$here/plugin.json" "$scratch/"
-  MPC_PLUGIN_FOLDER="$scratch" "$SDK/.sdk-tools/host_sim" "$here/build/native/lucky-dip.so" test --notes 36,37,38 --wav "$here/build/test.wav"
+  MPC_PLUGIN_FOLDER="$scratch" "$(ls -d "$BUILDER"/.*-tools | head -n 1)/host_sim" "$here/build/native/lucky-dip.so" test --notes 36,37,38 --wav "$here/build/test.wav"
 fi
