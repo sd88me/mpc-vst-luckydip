@@ -4,3 +4,4 @@ dist/
 build/
 /luckydip/
 /skins/
+tools/__pycache__/
