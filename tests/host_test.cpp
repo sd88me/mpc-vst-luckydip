@@ -167,7 +167,7 @@ int main(int argc, char** argv)
         const char want[] = LD_EXPECT_UID;
         CHECK(e->uniqueID == (VstInt32)(((unsigned)want[0] << 24) | ((unsigned)want[1] << 16) | ((unsigned)want[2] << 8) | (unsigned)want[3]),
               "uid %08x", (unsigned)e->uniqueID);
-        CHECK(e->numParams == kNumParams && kNumParams == 178, "%d params", e->numParams);
+        CHECK(e->numParams == kNumParams && kNumParams == 196, "%d params", e->numParams);
         std::ifstream lk("vst/params.lock");
         std::string k;
         int i = 0, bad = 0;
@@ -240,7 +240,7 @@ int main(int argc, char** argv)
     {
         const int i = rand() % kNumParams;
         const PSpec& s = g_pspecs[i];
-        if (!std::strcmp(s.key, "export") || !std::strcmp(s.key, "rescan") || std::strstr(s.key, "_reject") || std::strstr(s.key, "_fav")) continue;
+        if (!std::strcmp(s.key, "export") || !std::strcmp(s.key, "rescan") || !std::strcmp(s.key, "list_sel") || std::strstr(s.key, "_loc_") || std::strstr(s.key, "_sub_") || std::strstr(s.key, "_reject") || std::strstr(s.key, "_fav")) continue;
         e->setParameter(e, i, (float)(rand() % 1000) / 999.0f);
         if (r % 7 == 0) ld_dbg_tick(e);
         if (r % 50 == 0) run(e, 2);
@@ -253,6 +253,30 @@ int main(int argc, char** argv)
         CHECK(!stuck, "random sweep: no momentary left high (%d)", stuck);
     }
 
+    std::printf("folder pick-list\n");
+    {
+        set(e, "ui_open", 1); ld_dbg_tick(e);
+        CHECK(disp(e, idx("list_1")) == "Default (auto)" && disp(e, idx("list_title")) == "SAMPLE SOURCE: LOCATION", "source list: row 1 \"%s\"", disp(e, idx("list_1")).c_str());
+        CHECK(std::lround(plainOf(e, idx("list_sel"))) == 0, "current folder lit (row %ld)", std::lround(plainOf(e, idx("list_sel"))));
+        const int n = engi(e, "fl_count:0");
+        if (n > 1)
+        {
+            set(e, "list_sel", 1); ld_dbg_tick(e);
+            CHECK(engi(e, "fl_cur:0") == 1 && std::lround(plainOf(e, idx("ui_open"))) == 0, "a tap on row 2 picks it and closes the list");
+            set(e, "ui_open", 1); ld_dbg_tick(e);
+            set(e, "list_sel", 0); ld_dbg_tick(e);   // back to Default (auto)
+            CHECK(engi(e, "fl_cur:0") == 0, "back to Default (auto)");
+        }
+        else CHECK(true, "only one source location on this machine (%d)", n);
+        set(e, "ui_open", 2); ld_dbg_tick(e);
+        CHECK(disp(e, idx("list_1")) == "(whole folder)" || disp(e, idx("list_1")) == "", "inside list row 1 \"%s\"", disp(e, idx("list_1")).c_str());
+        set(e, "list_next", 1); ld_dbg_tick(e); set(e, "list_next", 0); ld_dbg_tick(e);
+        CHECK(plainOf(e, idx("list_next")) == 0, "list page key drops back");
+        set(e, "ui_open", 0); ld_dbg_tick(e);
+        CHECK(disp(e, idx("list_1")).empty(), "closed: rows empty");
+        set(e, "ui_open", 3); ld_dbg_tick(e);
+    }
+
     std::printf("state round trip\n");
     set(e, "pad1_lock", 1); set(e, "pad3_gain", 42); set(e, "prevent_dup", 0); ld_dbg_tick(e);
     sleepMs(50); ld_dbg_tick(e);
@@ -263,6 +287,7 @@ int main(int argc, char** argv)
     e2->dispatcher(e2, effSetChunk, 0, (VstIntPtr)c.size(), c.data(), 0);
     ld_dbg_tick(e2);
     CHECK(eng(e2, "state") == want, "second instance has the same kit");
+    CHECK(std::lround(plainOf(e2, idx("ui_open"))) == 0, "a project opens with no pick-list showing");
     CHECK(plainOf(e2, idx("pad1_lock")) == 1 && std::lround(plainOf(e2, idx("pad3_gain"))) == 42 && plainOf(e2, idx("prevent_dup")) == 0,
           "host values follow the state");
     {

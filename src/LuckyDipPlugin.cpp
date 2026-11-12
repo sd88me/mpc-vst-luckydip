@@ -141,7 +141,7 @@ public:
         frac_ = 0.0; have_ = 0; pos_ = 0;
     }
 
-    void reset() override { notifyAll_.store(true); }
+    void reset() override { closeList_.store(true); notifyAll_.store(true); }
 
     // ---- audio ----------------------------------------------------------------------------------------------------------------
     void process(mpc::ProcessContext& ctx) override
@@ -197,6 +197,7 @@ public:
         if (index < 0 || index >= kNumParams || !inst_) return;
         if (t_pushing == index) return;          // the host echoing what the worker just told it
         const PSpec& s = g_pspecs[index];
+        if (s.flags & kLocal) { localChanged(index, plain); return; }
         if (s.flags & (kText | kKind)) return;   // a readout's counter or a kind picture: nothing to send
         hostAt_[index].store(nowMs());
         if (loading_.load()) return;             // an MPC chunk is restoring values: the engine state follows as extra state
@@ -243,6 +244,7 @@ public:
         if (index < 0 || index >= kNumParams) return false;
         const PSpec& s = g_pspecs[index];
         char buf[128];
+        if ((s.flags & kLocal) && (s.flags & kText)) { std::lock_guard<std::mutex> g(listMu_); out = listText_[(size_t)(index - kListTitle)]; return true; }
         if (s.flags & (kText | kToggle)) { out = engineGet(s.key, buf, sizeof buf) ? buf : ""; return true; }   // readouts and key labels
         if (s.flags & kMomentary) { out = ""; return true; }
         return false;
@@ -328,6 +330,92 @@ private:
         selMoved_.store(true);
     }
 
+    // ---- the SETTINGS folder pick-list (kLocal) -----------------------------------------------------------------------------------
+    // ui_open k (1..4) shows the list of folder choice k - 1 (the engine's fl_* keys); 12 rows a page. A tap on a row (list_sel) picks
+    // that folder and closes the list; list_sel otherwise shows the current folder's row (12 = not on this page).
+    void localChanged(int index, float plain)
+    {
+        if (index == kUiOpen)
+        {
+            const int w = (int)std::lround(plain);
+            listWhich_.store(w);
+            if (w > 0)
+            {
+                char k[24], b[32];
+                std::snprintf(k, sizeof k, "fl_cur:%d", w - 1);
+                const int cur = engineGet(k, b, sizeof b) ? std::atoi(b) : 0;
+                listPage_.store(cur / kListRows);
+            }
+            listDirty_.store(true);
+            return;
+        }
+        if (index == kListSel)
+        {
+            const int row = (int)std::lround(plain), w = listWhich_.load();
+            if (row < 0 || row >= kListRows || w <= 0 || row == listLit_.load()) return;
+            char k[24], b[24];
+            std::snprintf(k, sizeof k, "fl_pick:%d", w - 1);
+            std::snprintf(b, sizeof b, "%d", listPage_.load() * kListRows + row);
+            engineSet(k, b);
+            closeList_.store(true);
+            return;
+        }
+        if (index == kListPrev || index == kListNext)
+        {
+            if (plain < 0.5f) { held_[index].store(false); return; }
+            if (held_[index].exchange(true)) return;
+            release_[index].store(true);
+            listPage_.store(std::max(0, listPage_.load() + (index == kListNext ? 1 : -1)));   // clamped when the rows are built
+            listDirty_.store(true);
+        }
+    }
+
+    // worker thread: close, rebuild the rows, tell the host
+    void listTick()
+    {
+        if (closeList_.exchange(false))
+        {
+            listWhich_.store(0);
+            if (get(kUiOpen) > 0.5f || told_[kUiOpen] != 0.0f) pushValue(kUiOpen, 0.0f);
+            listDirty_.store(true);
+        }
+        if (!listDirty_.exchange(false)) return;
+        const int w = listWhich_.load();
+        std::vector<std::string> t((size_t)kListRows + 2);
+        int lit = kListRows;
+        if (w > 0)
+        {
+            static const char* const titles[] = {"SAMPLE SOURCE: LOCATION", "SAMPLE SOURCE: INSIDE", "EXPORT FOLDER: LOCATION", "EXPORT FOLDER: INSIDE"};
+            char k[32], b[256];
+            std::snprintf(k, sizeof k, "fl_count:%d", w - 1);
+            const int n = engineGet(k, b, sizeof b) ? std::atoi(b) : 0;
+            std::snprintf(k, sizeof k, "fl_cur:%d", w - 1);
+            const int cur = engineGet(k, b, sizeof b) ? std::atoi(b) : 0;
+            const int pages = std::max(1, (n + kListRows - 1) / kListRows);
+            const int page = std::min(listPage_.load(), pages - 1);
+            listPage_.store(page);
+            t[0] = titles[w - 1];
+            t[1] = pages > 1 ? std::to_string(page + 1) + " / " + std::to_string(pages) : std::string();
+            for (int r = 0; r < kListRows; ++r)
+            {
+                const int i = page * kListRows + r;
+                if (i >= n) continue;
+                std::snprintf(k, sizeof k, "fl_item:%d:%d", w - 1, i);
+                t[(size_t)r + 2] = engineGet(k, b, sizeof b) ? b : "";
+                if (i == cur) lit = r;
+            }
+        }
+        listLit_.store(lit);
+        for (int j = 0; j < kListRows + 2; ++j)
+        {
+            bool changed;
+            { std::lock_guard<std::mutex> g(listMu_); changed = listText_[(size_t)j] != t[(size_t)j]; if (changed) listText_[(size_t)j] = t[(size_t)j]; }
+            if (changed) { counter_ = (counter_ + 1) % 1024; pushValue(kListTitle + j, (float)counter_); }
+        }
+        pushValue(kListSel, (float)lit);
+        wantDisplay_ = true;
+    }
+
     int kindOf(const char* catKey, const char* nameKey)
     {
         static const char* const cats[] = {"kick", "snare", "rim", "clap", "hat", "closed_hat", "open_hat", "tom", "conga", "percussion",
@@ -369,6 +457,7 @@ private:
         bool full = force || tick_ % 3 == 0;   // values: every 30 ms (engine gets are a short lock and a few string compares)
         if (resync_.exchange(false) || notifyAll_.exchange(false))
         {
+            closeList_.store(true);   // a project never opens with a pick-list showing
             for (int i = 0; i < kNumParams; ++i) { told_[i].store(-1.0e9f); hostMoved_[i].store(true); }
             std::fill(textHash_.begin(), textHash_.end(), 0u);
             full = true;
@@ -404,6 +493,8 @@ private:
                 if (!moved) ++changed;
             }
         }
+
+        listTick();
 
         // what each pad holds, for the skin's category pictures (0 empty, 1..23 category, 24 missing)
         if (full || selChanged)
@@ -469,6 +560,10 @@ private:
     std::atomic<float>* told_ = nullptr;       // the value the host was last told (or sent), per parameter
     std::vector<float> lastPos_;               // the host's last position, for settle()
     std::vector<uint32_t> textHash_;
+    std::mutex listMu_;
+    std::vector<std::string> listText_ = std::vector<std::string>((size_t)kListRows + 2);   // list_title, list_page, list_1 ..
+    std::atomic<int> listWhich_{0}, listPage_{0}, listLit_{kListRows};
+    std::atomic<bool> listDirty_{false}, closeList_{false};
     // audio thread: the engine's 44.1 kHz stream, resampled when the host runs at another rate
     int16_t pcm_[kChunk * 2] = {0};
     double step_ = 1.0, frac_ = 0.0;

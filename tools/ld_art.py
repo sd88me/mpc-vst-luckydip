@@ -224,6 +224,8 @@ def icon(c, name, cx, cy, s, col):
         for i in range(n):
             ox = (i - (n - 1) / 2) * s * 0.34
             c.poly([(cx + ox - dirn * s * 0.18, cy - s * 0.3), (cx + ox + dirn * s * 0.2, cy), (cx + ox - dirn * s * 0.18, cy + s * 0.3)], fill=col)
+    elif name == "down":
+        c.poly([(cx - s * 0.4, cy - s * 0.2), (cx + s * 0.4, cy - s * 0.2), (cx, cy + s * 0.3)], fill=col)
     elif name == "folder":
         c.rect((cx - s * 0.46, cy - s * 0.26, cx - s * 0.02, cy - s * 0.1), s * 0.05, fill=col)
         c.rect((cx - s * 0.46, cy - s * 0.18, cx + s * 0.46, cy + s * 0.36), s * 0.07, fill=col)
@@ -427,11 +429,12 @@ def dot_strip(w, h):
     s = Image.new("RGBA", (w, h * frames), (0, 0, 0, 0))
     for k in range(frames):
         cc = Canvas(w, h)
+        cc.rect((7, 0, w - 7, h), h / 2, fill=rgba(GRAPE_LO, 200))     # a dark outline, so a yellow bar shows on the yellow card
         if k == 0:
-            cc.rect((8, 1, w - 8, h - 1), (h - 2) / 2, fill=rgba(VIOLET))
+            cc.rect((8.5, 1.5, w - 8.5, h - 1.5), (h - 3) / 2, fill=rgba(VIOLET))
         else:
             top, bot = CANDY["red" if k == 24 else FAMILY[CATS[k - 1][1]]]
-            cc.vgrad((8, 1, w - 8, h - 1), top, bot, (h - 2) / 2)
+            cc.vgrad((8.5, 1.5, w - 8.5, h - 1.5), top, bot, (h - 3) / 2)
         s.alpha_composite(cc.image(), (0, k * h))
     return s
 

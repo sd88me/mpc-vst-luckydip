@@ -8,6 +8,7 @@ static const char *const ch_157[] = {"Copy samples", "Link to originals"};
 static const char *const ch_158[] = {"OFF", "ON"};
 static const char *const ch_159[] = {"Off", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"};
 static const char *const ch_160[] = {"OFF", "ON"};
+static const char *const ch_ui_open[] = {"Closed", "Source location", "Source inside", "Export location", "Export inside"};
 
 static const PSpec g_pspecs[] = {
     {"status", "Status", 0.0f, 1023.0f, 0.0f, 34, nullptr, 0, -1, 0.0f},
@@ -188,7 +189,26 @@ static const PSpec g_pspecs[] = {
     {"pad15_kind", "Pad 15 Kind", 0.0f, 24.0f, 0.0f, 288, nullptr, 0, -1, 0.0f},
     {"pad16_kind", "Pad 16 Kind", 0.0f, 24.0f, 0.0f, 288, nullptr, 0, -1, 0.0f},
     {"sel_kind", "Selected Pad Kind", 0.0f, 24.0f, 0.0f, 288, nullptr, 0, -1, 0.0f},
+    {"ui_open", "Folder List", 0.0f, 4.0f, 0.0f, 168, ch_ui_open, 5, -1, 0.0f},
+    {"list_sel", "Folder List Row", 0.0f, 12.0f, 12.0f, 160, nullptr, 0, -1, 0.0f},
+    {"list_prev", "Folder List Prev", 0.0f, 1.0f, 0.0f, 161, nullptr, 0, -1, 0.0f},
+    {"list_next", "Folder List Next", 0.0f, 1.0f, 0.0f, 161, nullptr, 0, -1, 0.0f},
+    {"list_title", "Folder List Title", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_page", "Folder List Page", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_1", "Folder List 1", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_2", "Folder List 2", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_3", "Folder List 3", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_4", "Folder List 4", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_5", "Folder List 5", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_6", "Folder List 6", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_7", "Folder List 7", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_8", "Folder List 8", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_9", "Folder List 9", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_10", "Folder List 10", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_11", "Folder List 11", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
+    {"list_12", "Folder List 12", 0.0f, 1023.0f, 0.0f, 162, nullptr, 0, -1, 0.0f},
 };
-static const int kNumParams = 178;
+static const int kNumParams = 196;
 static const int kNumEngineParams = 161;   // 0 .. this - 1 are the engine's keys
 static const int kFirstKind = 161;   // pad1_kind .. pad16_kind, then sel_kind
+static const int kUiOpen = 178, kListSel = 179, kListPrev = 180, kListNext = 181, kListTitle = 182, kListPage = 183, kList1 = 184, kListRows = 12;

@@ -73,10 +73,26 @@ NCAT_KINDS = 25
 for n in range(1, 17):
     row("pad%d_kind" % n, "Pad %d Kind" % n, 0, NCAT_KINDS - 1, 0, FL["kKind"] | FL["kNoAuto"])
 row("sel_kind", "Selected Pad Kind", 0, NCAT_KINDS - 1, 0, FL["kKind"] | FL["kNoAuto"])
+# The SETTINGS folder pick-list, drawn by the skin (the native menu opens empty for an external VST2). kLocal: handled by the front end.
+# ui_open: which list is open (0 closed, 1 source location, 2 source inside, 3 export location, 4 export inside); list_sel: the lit row
+# (0..11, 12 = none on this page); a tap on a row picks that folder and closes the list. list_1..12: the rows' text, list_page "2 / 5".
+UI_LISTS = ["Closed", "Source location", "Source inside", "Export location", "Export inside"]
+out.append("static const char *const ch_ui_open[] = {%s};" % ", ".join(json.dumps(o) for o in UI_LISTS))
+row("ui_open", "Folder List", 0, len(UI_LISTS) - 1, 0, FL["kLocal"] | FL["kChoice"] | FL["kNoAuto"], "ch_ui_open", len(UI_LISTS))
+LIST_ROWS = 12
+row("list_sel", "Folder List Row", 0, LIST_ROWS, LIST_ROWS, FL["kLocal"] | FL["kNoAuto"])
+row("list_prev", "Folder List Prev", 0, 1, 0, FL["kLocal"] | FL["kMomentary"] | FL["kNoAuto"])
+row("list_next", "Folder List Next", 0, 1, 0, FL["kLocal"] | FL["kMomentary"] | FL["kNoAuto"])
+row("list_title", "Folder List Title", 0, 1023, 0, FL["kLocal"] | FL["kText"] | FL["kNoAuto"])
+row("list_page", "Folder List Page", 0, 1023, 0, FL["kLocal"] | FL["kText"] | FL["kNoAuto"])
+for k in range(1, LIST_ROWS + 1):
+    row("list_%d" % k, "Folder List %d" % k, 0, 1023, 0, FL["kLocal"] | FL["kText"] | FL["kNoAuto"])
 
 out += ["", "static const PSpec g_pspecs[] = {"] + rows + ["};",
         "static const int kNumParams = %d;" % len(rows),
         "static const int kNumEngineParams = %d;   // 0 .. this - 1 are the engine's keys" % len(P),
-        "static const int kFirstKind = %d;   // pad1_kind .. pad16_kind, then sel_kind" % len(P), ""]
+        "static const int kFirstKind = %d;   // pad1_kind .. pad16_kind, then sel_kind" % len(P),
+        "static const int kUiOpen = %d, kListSel = %d, kListPrev = %d, kListNext = %d, kListTitle = %d, kListPage = %d, kList1 = %d, kListRows = %d;"
+        % tuple([len(P) + 17 + i for i in range(7)] + [LIST_ROWS]), ""]
 open(os.path.join(ROOT, "src", "params_gen.h"), "w").write("\n".join(out))
 print("src/params_gen.h: %d params (%d engine)" % (len(rows), len(P)))

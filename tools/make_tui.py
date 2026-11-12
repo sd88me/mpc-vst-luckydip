@@ -155,7 +155,7 @@ class Page:
     def __init__(self, tab, fn):
         self.tab, self.fn = tab, fn
         self.c = A.page_bg(W, H)
-        self.kids, self.groups, self.qrows = [], [], []
+        self.kids, self.groups, self.qrows, self.lists = [], [], [], []
         self.sample = {}
 
     # live text
@@ -245,24 +245,21 @@ def pads_page(tab, fn, first):
         kstrip = asset("kind", A.kind_strip, 158, 30, False, cd)
         # what it holds (category band) and the sample name: tap the name to hear the pad
         p.strip("pad%d_kind" % n, tx + 112, ty + 6, kstrip, 25, sample=KINDS[n - 1])
-        A.well(c, (tx + 16, ty + 48, tx + TILE_W - 16, ty + 94), 10, cd)
-        A.icon(c, "play", tx + TILE_W - 36, ty + 71, 16, A.rgba(A.well_dim(cd)))
-        p.text("pad%d_name" % n, (tx + 28, ty + 50, tx + TILE_W - 52, ty + 92), 20, A.well_text(cd), sample=NAMES[n - 1])
-        p.button("pad%d_play" % n, tx + 16, ty + 48, glow(TILE_W - 32, 46, A.WHITE), clear(TILE_W - 32, 46))
+        A.well(c, (tx + 16, ty + 48, tx + TILE_W - 16, ty + 104), 10, cd)
+        A.icon(c, "play", tx + TILE_W - 36, ty + 76, 18, A.rgba(A.well_dim(cd)))
+        p.text("pad%d_name" % n, (tx + 28, ty + 50, tx + TILE_W - 54, ty + 102), 22, A.well_text(cd), sample=NAMES[n - 1])
+        p.button("pad%d_play" % n, tx + 16, ty + 48, glow(TILE_W - 32, 56, A.WHITE), clear(TILE_W - 32, 56))
         # pool and gain
-        small(c, (tx + 18, ty + 113), "DRAWS", candy=cd)
-        A.well(c, (tx + 72, ty + 101, tx + 168, ty + 125), 8, cd)
-        p.text("pad%d_pill" % n, (tx + 80, ty + 101, tx + 164, ty + 125), 15, A.well_text(cd), sample=PILLS[n - 1])
-        small(c, (tx + TILE_W - 66, ty + 113), "GAIN", anchor="rm", candy=cd)
-        p.text("pad%d_gain" % n, (tx + TILE_W - 62, ty + 101, tx + TILE_W - 18, ty + 125), 17, A.ink_on(A.CANDY[cd][0]), just="right", sample="100")
-        p.slider("pad%d_gain" % n, tx + 14, ty + 132, TILE_W - 28, 34, sample=0.5)
+        small(c, (tx + 18, ty + 121), "GAIN", candy=cd, px=13)
+        p.text("pad%d_gain" % n, (tx + TILE_W - 90, ty + 108, tx + TILE_W - 18, ty + 134), 18, A.ink_on(A.CANDY[cd][0]), just="right", sample="100")
+        p.slider("pad%d_gain" % n, tx + 14, ty + 136, TILE_W - 28, 34, sample=0.5)
         # lock and reroll
         kw = (TILE_W - 32 - 10) // 2
         p.key("pad%d_lock" % n, tx + 16, ty + 178, kw, 40, "LOCK", "lock", "mint", toggle=True, sample=(n in (1, 4)))
         p.key("pad%d_reroll" % n, tx + 26 + kw, ty + 178, kw, 40, "REROLL", "dice", A.K_REROLL)
     for row in range(2):
         ty = 90 + row * (TILE_H + 8)
-        p.qgroup((16, ty + 128, 1264, ty + 170), ["pad%d_gain" % (first + row * 4 + k) for k in range(4)])
+        p.qgroup((16, ty + 132, 1264, ty + 174), ["pad%d_gain" % (first + row * 4 + k) for k in range(4)])
     return p
 
 
@@ -283,7 +280,7 @@ def edit_page():
     c = p.c
     # left: the 16 pads as on the MPC (pad 1 bottom left), tap to select; a candy bar under each shows what it holds
     A.card(c, (16, 90, 420, 620), "PADS", "yellow")
-    dots = asset("kinddot", A.dot_strip, 86, 7)
+    dots = asset("kinddot", A.dot_strip, 86, 9)
     for n in range(1, 17):
         r, col = 3 - (n - 1) // 4, (n - 1) % 4
         x, y = 36 + col * 94, 140 + r * 72
@@ -343,6 +340,7 @@ def folder_rows(p, x0, x1, keypre, loc_sample, sub_sample, cd):
     p.key(keypre + "_loc_prev", x0, 160, 46, 42, "", "left", "violet")
     p.key(keypre + "_loc_next", x1 - 46, 160, 46, 42, "", "right", "violet")
     A.well(c, (x0 + 54, 160, x1 - 54, 204), 12, cd)
+    A.icon(c, "down", x1 - 76, 182, 14, A.rgba(A.well_dim(cd)))
     A.icon(c, "folder", x0 + 76, 182, 20, A.rgba(A.CANDY[cd][1]))
     p.text(keypre + "_loc_name", (x0 + 96, 162, x1 - 64, 202), 20, A.well_text(cd), sample=loc_sample)
     small(c, (x0 + 2, 230), "INSIDE", candy=cd)
@@ -352,8 +350,68 @@ def folder_rows(p, x0, x1, keypre, loc_sample, sub_sample, cd):
     p.key(keypre + "_sub_next10", x1 - 46, 242, 46, 42, "", "right2", "purple")
     A.well(c, (x0 + 106, 242, x1 - 106, 286), 12, cd)
     p.text(keypre + "_sub_name", (x0 + 120, 244, x1 - 116, 284), 19, A.well_text(cd), sample=sub_sample)
+    A.icon(c, "down", x1 - 128, 264, 14, A.rgba(A.well_dim(cd)))
+    k = 1 if keypre == "src" else 3   # tap a field: its pick-list opens (ui_open k / k + 1)
+    p.button("ui_open", x0 + 54, 160, glow(x1 - x0 - 108, 44, A.WHITE), clear(x1 - x0 - 108, 44), bid=k, group=len(UI_LISTS))
+    p.button("ui_open", x0 + 106, 242, glow(x1 - x0 - 212, 44, A.WHITE), clear(x1 - x0 - 212, 44), bid=k + 1, group=len(UI_LISTS))
     small(c, (x0 + 23, 300), "-10", anchor="mm", px=11, candy=cd)
     small(c, (x1 - 23, 300), "+10", anchor="mm", px=11, candy=cd)
+
+
+UI_LISTS = ["Closed", "Source location", "Source inside", "Export location", "Export inside"]
+LIST_ROWS, LX, LY, LW, LH = 12, 250, 62, 780, 556
+
+
+def list_popup(p, sample_open=None):
+    """The folder pick-list: a dimmed page (tap it to close), a panel with the list's title, 12 live rows (two columns, filled down),
+    page keys and a close key. One local component on the whole page, shown while ui_open is 1..4 (RangedEnabling)."""
+    cd = "purple"
+    dim = asset("dim", lambda: Image.new("RGBA", (W, H), (12, 4, 30, 160)))
+
+    def panel():
+        cc = A.Canvas(LW, LH)
+        A.card(cc, (8, 6, LW - 8, LH - 10), None, cd, inner_top=52)
+        for r in range(LIST_ROWS):
+            col, row = divmod(r, 6)
+            x, y = 28 + col * 372, 64 + row * 66
+            A.well(cc, (x, y, x + 352, y + 56), 12, cd)
+        return cc.image()
+    pan = asset("listpanel", panel)
+    kids = [entry("close outside", "Button", {"version": 2, "onImage": dim, "offImage": dim, "buttonId": 0, "numButtonsInGroup": len(UI_LISTS),
+                                              "handleName": "Data", "gestureBehaviour": "Instant"}, B(0, 0, W, H), remap=P("ui_open")),
+            entry("panel", "Image", {"version": 2, "imageType": "Regular", "colour": "0", "image": pan}, B(LX, LY, LW, LH))]
+    def lab(key, box, px, colour, just="left"):
+        x0, y0, x1, y1 = box
+        jj = {"left": "left verticallyCentred", "centre": "horizontallyCentred verticallyCentred"}[just]
+        kids.append(entry(key, "Label", {"version": 1, "textStyle": text_style(float(round(px / TUI_PX)), hexc(colour), jj, "SemiBold"),
+                                         "type": "Value", "handleName": "Data"}, B(x0, y0, x1 - x0, y1 - y0), remap=P(key)))
+    def btn(key, x, y, on, off, bid, group):
+        w, h = img(off).size
+        kids.append(entry(key, "Button", {"version": 2, "onImage": on, "offImage": off, "buttonId": bid, "numButtonsInGroup": group,
+                                          "handleName": "Data", "gestureBehaviour": "Instant"}, B(x, y, w, h), remap=P(key)))
+    ink = A.ink_on(A.CANDY[cd][0])
+    lab("list_title", (LX + 28, LY + 8, LX + 600, LY + 54), 19, ink)
+    xk = asset("key", A.key, 56, 38, "", "x", "red", "off", 15, False)
+    btn("ui_open", LX + LW - 78, LY + 10, xk, xk, 0, len(UI_LISTS))
+    for r in range(LIST_ROWS):
+        col, row = divmod(r, 6)
+        x, y = LX + 28 + col * 372, LY + 64 + row * 66
+        lab("list_%d" % (r + 1), (x + 18, y + 2, x + 340, y + 54), 20, A.well_text(cd))
+        btn("list_sel", x, y, glow(352, 56, A.WHITE), clear(352, 56), r, LIST_ROWS + 1)
+    yb = LY + LH - 66
+    pk = asset("key", A.key, 150, 42, "PREV", "left", "violet", "off", 15, False)
+    pkp = asset("key", A.key, 150, 42, "PREV", "left", "violet", "pressed", 15, False)
+    nk = asset("key", A.key, 150, 42, "NEXT", "right", "violet", "off", 15, False)
+    nkp = asset("key", A.key, 150, 42, "NEXT", "right", "violet", "pressed", 15, False)
+    btn("list_prev", LX + 28, yb, pkp, pk, 1, 1)
+    btn("list_next", LX + LW - 178, yb, nkp, nk, 1, 1)
+    lab("list_page", (LX + 300, yb, LX + LW - 300, yb + 42), 18, ink, just="centre")
+    name = "folderlist"
+    DEFS[name] = component(kids)
+    p.lists.append(entry("folder list", name, {"version": 1, "handleName": "Data"}, B(0, 0, W, H),
+                         ind=["RangedEnabling/1/%d/%d/%s" % (len(UI_LISTS) - 1, len(UI_LISTS), P("ui_open"))]))
+    p.popup = kids
+    p.popup_sample = sample_open
 
 
 def settings_page():
@@ -390,13 +448,18 @@ def settings_page():
     c.text((588, 588), "RESCAN after changing these.", 13, A.rgba(A.ink_on(A.CANDY["green"][0])), anchor="lm", weight="SemiBold")
     p.key("unlock_all", 1032, 554, 214, 42, "UNLOCK ALL PADS", "unlock", "violet", px=14)
     p.qgroup((22, 452, 1258, 606), ["skip_loops", "prevent_dup", "max_size", "export_mode"])
+    p.sample["ui_open"] = 0
+    list_popup(p, {"list_title$": "SAMPLE SOURCE: LOCATION", "list_page$": "1 / 2", "list_sel": 0,
+                   **{"list_%d$" % (i + 1): t for i, t in enumerate(["Default (auto)", "Expansions", "MPC Documents", "Splice", "Features",
+                                                                       "Force Documents", "My Samples", "Drum Breaks", "Field Recordings",
+                                                                       "Vinyl Rips", "USB-STICK/Samples", "One Shots"])}})
     return p
 
 
 # ---- preview: the background plus the widgets at sample values (checks that the live parts land on the art) ------------------
-def render_preview(p, bgname):
+def render_preview(p, bgname, base=None):
     from PIL import ImageDraw
-    im = Image.open(os.path.join(OUT, bgname)).convert("RGBA")
+    im = base.copy() if base is not None else Image.open(os.path.join(OUT, bgname)).convert("RGBA")
     d = ImageDraw.Draw(im)
     radio_seen = {}
     for k in p.kids:
@@ -406,7 +469,9 @@ def render_preview(p, bgname):
         remap = k["handle remapping"]["map"][0]["value"] if k["handle remapping"]["map"] else None
         key = KEYS[int(remap.split()[-1])] if remap else None
         smp = p.sample.get(key)
-        if typ == "Button":
+        if typ == "Image" and data.get("imageType") == "Regular" and data["image"] in _made:
+            im.alpha_composite(img(data["image"]), (x, y))
+        elif typ == "Button":
             if data["numButtonsInGroup"] > 1:
                 lit = smp == data["buttonId"]
             else:
@@ -427,7 +492,7 @@ def render_preview(p, bgname):
             fi = int(round(val * (frames - 1))) if smp[0] == "slider" else int(val)
             im.alpha_composite(sim.crop((0, fi * sh, sw, fi * sh + sh)), (x, y))
     # Q-Link groups, as the MPC's overlay draws them
-    for g in p.groups:
+    for g in (p.groups if base is None else []):
         x, y, w, h = [int(v) for v in g.split()]
         d.rectangle([x, y, x + w, y + h], outline=(80, 200, 255, 160), width=1)
     return im
@@ -446,7 +511,7 @@ def main():
         slug = p.tab.lower().replace(" ", "_").replace("-", "_")
         bgname = "bg_%s.png" % slug
         p.c.image().convert("RGB").save(os.path.join(OUT, bgname))
-        kids = [entry("bg", "Image", {"version": 2, "imageType": "Regular", "colour": "0", "image": bgname}, "0 0 1280 628")] + p.kids
+        kids = [entry("bg", "Image", {"version": 2, "imageType": "Regular", "colour": "0", "image": bgname}, "0 0 1280 628")] + p.kids + p.lists
         tabs.append({"version": 1, "tabName": p.tab, "fnKeyIndex": p.fn, "fnKeySubIndex": 0,
                      "componentDefinition": component(kids, background=bgd(hexc(A.GRAPE))), "qlinkBoundsData": p.groups})
         q = {"Q-Link %d" % n: -1 for n in range(1, 17)}
@@ -455,10 +520,17 @@ def main():
                 q["Q-Link %d" % (13 - 4 * gi + i)] = KEYS.index(key)
         qmaps.append({"Tab": p.fn + 1, "SubTab": 1, "Bank Direction": "RowTopDown", "Q-Links": q})
         if preview:
-            render_preview(p, bgname).convert("RGB").save(os.path.join(PREVIEW, slug + ".png"))
+            im = render_preview(p, bgname)
+            im.convert("RGB").save(os.path.join(PREVIEW, slug + ".png"))
+            if getattr(p, "popup", None):
+                saved = (p.kids, p.sample)
+                p.kids, p.sample = p.popup, dict(p.sample, **p.popup_sample)
+                over = render_preview(p, None, base=im)
+                p.kids, p.sample = saved
+                over.convert("RGB").save(os.path.join(PREVIEW, slug + "_list.png"))
     repl = [{"key": P(k), "value": v} for k, v in (("export_mode", ["Copy samples", "Link to originals"]), ("skip_loops", ["OFF", "ON"]),
                                                    ("max_size", ["Off", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"]),
-                                                   ("prevent_dup", ["OFF", "ON"]), ("follow", ["OFF", "ON"]))]
+                                                   ("prevent_dup", ["OFF", "ON"]), ("follow", ["OFF", "ON"]), ("ui_open", UI_LISTS))]
     defs = [{"key": "knob overlay", "value": overlay_def()}] + [{"key": k, "value": v} for k, v in DEFS.items()]
     tui = {"pageData": {"version": 1,
                         "componentDefinitions": {"version": 2, "importFiles": [], "localComponentDefinitions": defs},

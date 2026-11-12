@@ -447,6 +447,23 @@ struct Inst {
         return pre + nm;
     }
     /* which: 0 source location, 1 source inside, 2 export location, 3 export inside; d = steps */
+    /* The folder lists for a drawn pick-list (1.0): which = 0 source location, 1 source inside, 2 export location, 3 export inside. */
+    int folder_count_locked(int which) { FolderSel &f = which < 2 ? src : exp; return which % 2 == 0 ? (int)f.locs.size() : (int)f.subs[f.loc].size(); }
+    int folder_cur_locked(int which) { FolderSel &f = which < 2 ? src : exp; return which % 2 == 0 ? f.loc : f.sub; }
+    std::string folder_item_locked(int which, int i) {
+        FolderSel &f = which < 2 ? src : exp;
+        if (i < 0 || i >= folder_count_locked(which)) return "";
+        if (which % 2 == 0) return folder_label(f.locs[i], "Default (auto)", 40);
+        return i == 0 ? std::string("(whole folder)") : base_name(f.subs[f.loc][i]);
+    }
+    void pick_folder(int which, int i) {
+        std::lock_guard<std::mutex> l(mu);
+        FolderSel &f = which < 2 ? src : exp;
+        if (i < 0 || i >= folder_count_locked(which)) return;
+        if (which % 2 == 0) { f.loc = i; f.sub = 0; } else f.sub = i;
+        apply_folders_locked();
+        status = which < 2 ? "Source set: 'RESCAN'" : "Export folder set";
+    }
     void step_folder(int which, int d) {
         std::lock_guard<std::mutex> l(mu);
         FolderSel &f = which < 2 ? src : exp;
@@ -766,6 +783,7 @@ void e_set_param(void *h, const char *key, const char *val) {
             return;
         }
     }
+    if (!strncmp(key, "fl_pick:", 8)) { in->pick_folder(atoi(key + 8), atoi(val)); return; }
     if (!strcmp(key, "export_mode")) { std::lock_guard<std::mutex> l(in->mu); in->link_samples = atoi(val) == 1; return; }
     if (!strcmp(key, "skip_loops")) { std::lock_guard<std::mutex> l(in->mu); in->cfg.scan.skip_loops = is_on(val); in->status = "'RESCAN' to apply"; return; }
     if (!strcmp(key, "max_size")) { std::lock_guard<std::mutex> l(in->mu); in->size_idx = std::max(0, std::min(NSIZES - 1, atoi(val))); in->apply_folders_locked(); in->status = "'RESCAN' to apply"; return; }
@@ -826,6 +844,12 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
     }
     std::unique_lock<std::mutex> l(in->mu, std::defer_lock);
     if (audio) { if (!l.try_lock()) return 0; } else l.lock();
+    if (!strncmp(key, "fl_count:", 9)) return put(buf, n, std::to_string(in->folder_count_locked(atoi(key + 9) & 3)));
+    if (!strncmp(key, "fl_cur:", 7)) return put(buf, n, std::to_string(in->folder_cur_locked(atoi(key + 7) & 3)));
+    if (!strncmp(key, "fl_item:", 8)) {
+        const char *c2 = strchr(key + 8, ':');
+        return c2 ? put(buf, n, in->folder_item_locked(atoi(key + 8) & 3, atoi(c2 + 1))) : 0;
+    }
     if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 23));
     if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 23));
     if (!strcmp(key, "src_sub_name")) return put(buf, n, Inst::sub_label(in->src));
