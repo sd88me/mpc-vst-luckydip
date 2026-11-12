@@ -118,7 +118,7 @@ def clear(w, h, a=3):   # alpha 3: invisible but still a touch area (fully trans
 def glow(w, h, colour):
     def make(w, h, colour):
         c = A.Canvas(w, h)
-        c.rect((1, 1, w - 1, h - 1), 8, fill=A.rgba(colour, 46), outline=A.rgba(colour, 220), width=2)
+        c.rect((1, 1, w - 1, h - 1), 10, fill=A.rgba(colour, 50), outline=A.rgba(colour, 230), width=2.5)
         return c.image()
     return asset("glow", make, w, h, colour)
 
@@ -129,9 +129,9 @@ FOCUS = {"version": 1, "backgroundColour": "12ffffff", "outlineColour": hexc(A.G
 SLIDER_FRAMES = 101
 
 
-def slider_def(w, h, colour):
-    name = "ldslider_%dx%d_%s" % (w, h, hexc(colour))
-    strip = asset("slider", A.slider_strip, w, h, SLIDER_FRAMES, colour)
+def slider_def(w, h):
+    name = "ldslider_%dx%d" % (w, h)
+    strip = asset("slider", A.slider_strip, w, h, SLIDER_FRAMES)
     if name not in DEFS:
         DEFS[name] = component([
             entry("focus", "Focus", FOCUS, B(-4, -3, w + 8, h + 6), visible="WhenFocussed"),
@@ -159,7 +159,7 @@ class Page:
         self.sample = {}
 
     # live text
-    def text(self, key, box, px, colour=A.CREAM, just="left", sample="", style="SemiBold"):
+    def text(self, key, box, px, colour=A.GOLD, just="left", sample="", style="SemiBold"):
         x0, y0, x1, y1 = box
         j = {"left": "left verticallyCentred", "centre": "horizontallyCentred verticallyCentred", "right": "right verticallyCentred"}[just]
         self.kids.append(entry(key, "Label", {"version": 1, "textStyle": text_style(float(round(px / TUI_PX)), hexc(colour), j, style),
@@ -175,21 +175,21 @@ class Page:
         else:
             self.sample[key] = sample
 
-    def key(self, key, x, y, w, h, caption="", icon=None, colour=A.GOLD, toggle=False, solid=False, px=15, sample=False):
-        """A key at (x, y) w x h (+6 px lip). Toggles light up; momentaries sink while pressed."""
-        off = asset("key", A.key, w, h, caption, icon, colour, "off", px, solid)
-        on = asset("key", A.key, w, h, caption, icon, colour, "on" if toggle else "pressed", px, solid)
+    def key(self, key, x, y, w, h, caption="", icon=None, candy="pink", toggle=False, px=15, sample=False):
+        """A pill key at (x, y) w x h (+6 px shadow). Toggles: dark, lit candy when on; momentaries: candy, sink while pressed."""
+        off = asset("key", A.key, w, h, caption, icon, candy, "off", px, toggle)
+        on = asset("key", A.key, w, h, caption, icon, candy, "on" if toggle else "pressed", px, toggle)
         self.button(key, x, y, on, off, sample=sample)
 
-    def segments(self, key, x, y, w, h, captions, colour=A.GOLD, px=15, gap=4, sample=0):
+    def segments(self, key, x, y, w, h, captions, candy="pink", px=15, gap=6, sample=0):
         for i, cap in enumerate(captions):
-            on = asset("seg", A.seg, w, h, cap, colour, True, px)
-            off = asset("seg", A.seg, w, h, cap, colour, False, px)
+            on = asset("seg", A.seg, w, h, cap, candy, True, px)
+            off = asset("seg", A.seg, w, h, cap, candy, False, px)
             self.button(key, x + i * (w + gap), y, on, off, bid=i, group=len(captions))
         self.sample[key] = sample
 
-    def slider(self, key, x, y, w, h, colour=A.GOLD, sample=0.5):
-        comp, strip = slider_def(w, h, colour)
+    def slider(self, key, x, y, w, h, sample=0.5):
+        comp, strip = slider_def(w, h)
         self.kids.append(entry(key, comp, {"version": 1, "handleName": "Data"}, B(x, y, w, h), remap=P(key), focus="Yes"))
         self.sample[key] = ("slider", strip, sample, w, h)
 
@@ -207,54 +207,60 @@ class Page:
 
 # ---- shared: the header on every tab ------------------------------------------------------------------------------------------
 def header(p, status="Kit generated", lib="2,184 samples"):
+    """The 0.9 slot-machine banner on every tab: wordmark, three reels, the status well, GENERATE ALL."""
     c = p.c
-    A.wordmark(c, 22, 44)
-    A.well(c, (330, 16, 1030, 72), 10)
-    c.ellipse((348, 38, 360, 50), fill=A.rgba(A.FAMILY["perc"]))
-    p.text("status", (370, 18, 840, 70), 22, A.CREAM, sample=status)
-    p.text("lib_info", (840, 18, 1014, 70), 17, A.DIM, just="right", sample=lib)
-    p.key("generate", 1046, 14, 216, 54, "GENERATE ALL", "dice", A.GOLD, solid=True, px=17)
+    A.banner(c, (6, 4, 1274, 80))
+    A.wordmark(c, 26, 43, 44)
+    for k, sym in enumerate(("cherry", "seven", "star")):
+        A.reel(c, 300 + k * 44, 42, sym, 36)
+    A.well(c, (412, 20, 1030, 66), 12)
+    p.text("status", (430, 22, 850, 64), 21, A.GOLD, sample=status)
+    p.text("lib_info", (850, 22, 1016, 64), 16, A.LAVENDER, just="right", sample=lib)
+    p.key("generate", 1044, 17, 214, 48, "GENERATE ALL", "dice", A.K_GEN, px=16)
+
+
+def small(c, xy, s, anchor="lm", px=12):
+    A.caption(c, xy, s, px, anchor=anchor, spacing=1.4)
 
 
 # ---- PADS 1-8 / PADS 9-16 ----------------------------------------------------------------------------------------------------
 NAMES = ["DH Kick 04", "Snare MSXII Yo", "TH Snare Magic", "SH Perc 12", "TH Hat 10", "DH Cld Hat 2", "Magic HiHat", "NT Perc 7",
          "Sub Boom 808", "Vinyl Clap", "Rim Tick", "Warm Rhodes Cm", "Vox Hey!", "Glitch 05", "Long Pad Am", "Ride Bell"]
 KINDS = [1, 2, 2, 10, 5, 6, 5, 10, 17, 4, 3, 20, 16, 15, 22, 12]
-TILE_W, TILE_H = 302, 256
+PILLS = ["KICK", "SNARE", "SNARE", "PERC", "HAT", "C.HAT", "HAT", "PERC", "BASS", "CLAP", "RIM", "CHORD", "VOX", "GLITCH", "PAD", "RIDE"]
+TILE_W, TILE_H = 302, 260
 
 
 def pads_page(tab, fn, first):
     p = Page(tab, fn)
     header(p)
     c = p.c
-    kstrip = asset("kind", A.kind_strip, 222, 34)
+    kstrip = asset("kind", A.kind_strip, 158, 30)
     for i in range(8):
         n = first + i
         col, row = i % 4, i // 4
-        tx, ty = 16 + col * (TILE_W + 12), 90 + row * (TILE_H + 12)
-        A.card(c, (tx, ty, tx + TILE_W, ty + TILE_H), r=14)
-        # pad number and what it holds
-        A.well(c, (tx + 12, ty + 12, tx + 62, ty + 46), 7)
-        c.text((tx + 37, ty + 30), str(n), 24, A.rgba(A.CREAM), weight="Bold")
-        p.strip("pad%d_kind" % n, tx + 68, ty + 12, kstrip, 25, sample=KINDS[n - 1])
-        # sample name: tap it to hear the pad
-        A.well(c, (tx + 12, ty + 56, tx + TILE_W - 12, ty + 106), 9)
-        A.icon(c, "play", tx + TILE_W - 34, ty + 81, 16, A.rgba(A.FAINT))
-        p.text("pad%d_name" % n, (tx + 26, ty + 58, tx + TILE_W - 50, ty + 104), 21, A.CREAM, sample=NAMES[n - 1])
-        p.button("pad%d_play" % n, tx + 12, ty + 56, glow(TILE_W - 24, 50, A.GOLD), clear(TILE_W - 24, 50))
+        tx, ty = 16 + col * (TILE_W + 12), 90 + row * (TILE_H + 8)
+        A.card(c, (tx, ty, tx + TILE_W, ty + TILE_H), "PAD %d" % n, A.TILE_ORDER[i], inner_top=40, sprinkles=True)
+        # what it holds (category band) and the sample name: tap the name to hear the pad
+        p.strip("pad%d_kind" % n, tx + 112, ty + 6, kstrip, 25, sample=KINDS[n - 1])
+        A.well(c, (tx + 16, ty + 48, tx + TILE_W - 16, ty + 94), 10)
+        A.icon(c, "play", tx + TILE_W - 36, ty + 71, 16, A.rgba(A.LAV_DIM))
+        p.text("pad%d_name" % n, (tx + 28, ty + 50, tx + TILE_W - 52, ty + 92), 20, A.GOLD, sample=NAMES[n - 1])
+        p.button("pad%d_play" % n, tx + 16, ty + 48, glow(TILE_W - 32, 46, A.GOLD), clear(TILE_W - 32, 46))
         # pool and gain
-        c.text((tx + 14, ty + 126), "DRAWS", 12, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.4)
-        p.text("pad%d_pill" % n, (tx + 70, ty + 114, tx + 180, ty + 138), 15, A.DIM, sample=A.CATS[KINDS[n - 1] - 1][0].split()[0])
-        c.text((tx + TILE_W - 58, ty + 126), "GAIN", 12, A.rgba(A.FAINT), anchor="rm", weight="Bold", spacing=1.4)
-        p.text("pad%d_gain" % n, (tx + TILE_W - 56, ty + 114, tx + TILE_W - 14, ty + 138), 16, A.CREAM, just="right", sample="100")
-        p.slider("pad%d_gain" % n, tx + 12, ty + 144, TILE_W - 24, 32, A.GOLD, sample=0.5)
+        small(c, (tx + 18, ty + 113), "DRAWS")
+        A.well(c, (tx + 72, ty + 101, tx + 168, ty + 125), 8)
+        p.text("pad%d_pill" % n, (tx + 80, ty + 101, tx + 164, ty + 125), 15, A.GOLD, sample=PILLS[n - 1])
+        small(c, (tx + TILE_W - 66, ty + 113), "GAIN", anchor="rm")
+        p.text("pad%d_gain" % n, (tx + TILE_W - 62, ty + 101, tx + TILE_W - 18, ty + 125), 17, A.WHITE, just="right", sample="100")
+        p.slider("pad%d_gain" % n, tx + 14, ty + 132, TILE_W - 28, 34, sample=0.5)
         # lock and reroll
-        kw = (TILE_W - 24 - 10) // 2
-        p.key("pad%d_lock" % n, tx + 12, ty + 192, kw, 46, "LOCK", "lock", A.GOLD, toggle=True, sample=(n in (1, 4)))
-        p.key("pad%d_reroll" % n, tx + 22 + kw, ty + 192, kw, 46, "REROLL", "dice", A.FAMILY["tonal"])
+        kw = (TILE_W - 32 - 10) // 2
+        p.key("pad%d_lock" % n, tx + 16, ty + 178, kw, 40, "LOCK", "lock", "mint", toggle=True, sample=(n in (1, 4)))
+        p.key("pad%d_reroll" % n, tx + 26 + kw, ty + 178, kw, 40, "REROLL", "dice", A.K_REROLL)
     for row in range(2):
-        ty = 90 + row * (TILE_H + 12)
-        p.qgroup((16, ty + 138, 1264, ty + 182), ["pad%d_gain" % (first + row * 4 + k) for k in range(4)])
+        ty = 90 + row * (TILE_H + 8)
+        p.qgroup((16, ty + 128, 1264, ty + 170), ["pad%d_gain" % (first + row * 4 + k) for k in range(4)])
     return p
 
 
@@ -266,100 +272,86 @@ CAT_ROWS = [("DRUMS", ["kick", "snare", "rim", "clap", "tom", "conga", "percussi
 
 
 def pad_key(n, lit):
-    def make(n, lit):
-        return A.key(86, 50, str(n), None, A.GOLD, "on" if lit else "off", 22)
-    return asset("padkey", make, n, lit)
-
-
-def dot_strip():
-    def make():
-        frames, w, h = 25, 86, 7
-        s = Image.new("RGBA", (w, h * frames), (0, 0, 0, 0))
-        for k in range(frames):
-            col = (70, 62, 98) if k == 0 else A.FAMILY["missing"] if k == 24 else A.FAMILY[A.CATS[k - 1][1]]
-            cc = A.Canvas(w, h)
-            cc.rect((6, 1, w - 6, h - 1), 3, fill=A.rgba(col))
-            s.alpha_composite(cc.image(), (0, k * h))
-        return s
-    return asset("kinddot", make)
+    return asset("padkey", lambda n, lit: A.key(86, 48, str(n), None, "yellow", "on" if lit else "off", 22, True), n, lit)
 
 
 def edit_page():
     p = Page("PAD EDIT", 2)
     header(p, status="Pad 7 selected")
     c = p.c
-    # left: the 16 pads as on the MPC (pad 1 bottom left), tap to select; a colour bar under each shows what it holds
-    A.card(c, (16, 90, 420, 620), "PADS", accent=A.GOLD)
-    dots = dot_strip()
+    # left: the 16 pads as on the MPC (pad 1 bottom left), tap to select; a candy bar under each shows what it holds
+    A.card(c, (16, 90, 420, 620), "PADS", "yellow")
+    dots = asset("kinddot", A.dot_strip, 86, 7)
     for n in range(1, 17):
         r, col = 3 - (n - 1) // 4, (n - 1) % 4
-        x, y = 34 + col * 94, 128 + r * 76
+        x, y = 36 + col * 94, 140 + r * 72
         p.button("sel_pad", x, y, pad_key(n, True), pad_key(n, False), bid=n - 1, group=16)
-        p.strip("pad%d_kind" % n, x, y + 59, dots, 25, sample=KINDS[n - 1])
+        p.strip("pad%d_kind" % n, x, y + 56, dots, 25, sample=KINDS[n - 1])
     p.sample["sel_pad"] = 6
-    p.key("follow", 34, 438, 368, 40, "FOLLOW PLAYED PAD", "follow", A.FAMILY["perc"], toggle=True, sample=True)
-    c.text((34, 506), "KIT", 14, A.rgba(A.DIM), anchor="lm", weight="Bold", spacing=1.6)
-    p.key("clear_all", 34, 520, 179, 38, "CLEAR ALL", "clear", A.FAMILY["kick"], px=14)
-    p.key("normalise", 223, 520, 179, 38, "MATCH LEVELS", "level", A.FAMILY["tonal"], px=14)
-    p.key("unlock_all", 34, 568, 179, 38, "UNLOCK ALL", "unlock", A.GOLD, px=14)
-    p.key("export", 223, 568, 179, 38, "EXPORT KIT", "export", A.GOLD, solid=True, px=14)
+    p.key("follow", 36, 432, 364, 40, "FOLLOW PLAYED PAD", "follow", "mint", toggle=True, sample=True)
+    small(c, (38, 500), "KIT", px=14)
+    p.key("clear_all", 36, 516, 177, 38, "CLEAR ALL", "clear", A.K_CLEAR, px=14)
+    p.key("normalise", 223, 516, 177, 38, "MATCH LEVELS", "level", "blue", px=14)
+    p.key("unlock_all", 36, 564, 177, 38, "UNLOCK ALL", "unlock", "violet", px=14)
+    p.key("export", 223, 564, 177, 38, "EXPORT KIT", "export", "orange", px=14)
 
     # right top: the selected pad
-    A.card(c, (436, 90, 1264, 358), "SELECTED PAD", accent=A.GOLD)
-    big = asset("kindbig", A.kind_strip, 300, 40, True)
-    p.strip("sel_kind", 456, 124, big, 25, sample=5)
-    c.text((786, 144), "PAD", 14, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.6)
-    p.text("sel_pad", (830, 124, 900, 164), 28, A.CREAM, sample="7", style="Bold")
-    p.key("sel_prev", 1132, 122, 52, 40, "", "left", A.CREAM)
-    p.key("sel_next", 1192, 122, 52, 40, "", "right", A.CREAM)
-    A.well(c, (456, 176, 1244, 232), 10)
-    A.icon(c, "play", 1216, 204, 20, A.rgba(A.FAINT))
-    p.text("sel_name", (474, 178, 1190, 230), 26, A.CREAM, sample="TechHouse-HiHat-Magic 03")
-    p.button("sel_play", 456, 176, glow(788, 56, A.GOLD), clear(788, 56))
-    c.text((458, 260), "GAIN", 14, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.6)
-    p.slider("sel_gain", 520, 244, 600, 34, A.GOLD, sample=0.5)
-    p.text("sel_gain", (1136, 244, 1244, 278), 20, A.CREAM, just="right", sample="100 %")
+    A.card(c, (436, 90, 1264, 358), "SELECTED PAD", "pink")
+    big = asset("kindbig", A.kind_strip, 230, 34, True)
+    p.strip("sel_kind", 660, 93, big, 25, sample=5)
+    small(c, (930, 110), "PAD", px=14)
+    p.text("sel_pad", (970, 92, 1030, 128), 26, A.WHITE, sample="7", style="Bold")
+    p.key("sel_prev", 1072, 146, 80, 42, "", "left", "violet")
+    p.key("sel_next", 1164, 146, 80, 42, "", "right", "violet")
+    A.well(c, (456, 140, 1056, 194), 12)
+    A.icon(c, "play", 1030, 167, 18, A.rgba(A.LAV_DIM))
+    p.text("sel_name", (472, 142, 1010, 192), 25, A.GOLD, sample="TechHouse-HiHat-Magic 03")
+    p.button("sel_play", 456, 140, glow(600, 54, A.GOLD), clear(600, 54))
+    small(c, (458, 224), "GAIN", px=14)
+    p.slider("sel_gain", 520, 207, 600, 36, sample=0.5)
+    p.text("sel_gain", (1136, 207, 1244, 243), 20, A.WHITE, just="right", sample="100")
     kw = (788 - 4 * 10) // 5
-    for i, (k, cap, ic, colr, tog) in enumerate([("sel_lock", "LOCK", "lock", A.GOLD, True), ("sel_reroll", "REROLL", "dice", A.FAMILY["tonal"], False),
-                                                ("sel_clear", "CLEAR", "clear", A.FAMILY["kick"], False), ("sel_fav", "FAVOURITE", "star", A.GOLD, False),
-                                                ("sel_reject", "REJECT", "x", A.FAMILY["missing"], False)]):
-        p.key(k, 456 + i * (kw + 10), 298, kw, 44, cap, ic, colr, toggle=tog, px=15)
-    p.qgroup((450, 238, 1250, 284), ["sel_gain", "sel_pad", "sel_lock", "follow"])
+    for i, (k, cap, ic, cd, tog) in enumerate([("sel_lock", "LOCK", "lock", "mint", True), ("sel_reroll", "REROLL", "dice", A.K_REROLL, False),
+                                              ("sel_clear", "CLEAR", "clear", A.K_CLEAR, False), ("sel_fav", "FAVOURITE", "star", A.K_FAV, False),
+                                              ("sel_reject", "REJECT", "x", A.K_REJECT, False)]):
+        p.key(k, 456 + i * (kw + 10), 262, kw, 44, cap, ic, cd, toggle=tog, px=15)
+    small(c, (458, 330), "TAP THE NAME TO HEAR THE PAD.  FAVOURITES COME UP TWICE AS OFTEN, REJECTS NEVER.", px=11)
+    p.qgroup((450, 202, 1250, 248), ["sel_gain", "sel_pad", "sel_lock", "follow"])
 
     # right bottom: which categories this pad draws from, by family
-    A.card(c, (436, 370, 1264, 620), "THIS PAD DRAWS FROM", accent=A.FAMILY["perc"])
-    c.text((1246, 393), "tap to add or remove", 13, A.rgba(A.FAINT), anchor="rm")
+    A.card(c, (436, 370, 1264, 620), "THIS PAD DRAWS FROM", "purple")
+    small(c, (1210, 390), "TAP TO ADD OR REMOVE", anchor="rm", px=11)
     lit = {"hat", "closed_hat", "open_hat"}
     for r, (fam, cats) in enumerate(CAT_ROWS):
-        y = 412 + r * 50
-        c.text((456, y + 20), fam, 13, A.rgba(A.DIM), anchor="lm", weight="Bold", spacing=1.4)
+        y = 422 + r * 48
+        small(c, (458, y + 19), fam, px=13)
         for i, ck in enumerate(cats):
             k = A.CAT_KEYS.index(ck)
             cap, famc = A.CATS[k]
-            p.key("sel_cat_" + ck, 556 + i * 98, y, 92, 38, cap.replace("CLOSED ", "CL ").replace("OPEN ", "OP "), None, A.FAMILY[famc],
-                  toggle=True, px=14, sample=ck in lit)
+            p.key("sel_cat_" + ck, 556 + i * 98, y, 92, 36, cap.replace("CLOSED ", "CL ").replace("OPEN ", "OP "), None, A.FAMILY[famc],
+                  toggle=True, px=13, sample=ck in lit)
     return p
 
 
 # ---- SETTINGS ---------------------------------------------------------------------------------------------------------------
-def folder_rows(p, x0, x1, keypre, colour, loc_sample, sub_sample):
+def folder_rows(p, x0, x1, keypre, loc_sample, sub_sample):
     """LOCATION and INSIDE rows: a well with the folder name and arrow keys (INSIDE also jumps by 10)."""
     c = p.c
-    c.text((x0, 140), "LOCATION", 13, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.4)
-    p.key(keypre + "_loc_prev", x0, 152, 46, 46, "", "left", A.CREAM)
-    p.key(keypre + "_loc_next", x1 - 46, 152, 46, 46, "", "right", A.CREAM)
-    A.well(c, (x0 + 54, 152, x1 - 54, 198), 9)
-    A.icon(c, "folder", x0 + 76, 175, 20, A.rgba(colour))
-    p.text(keypre + "_loc_name", (x0 + 96, 154, x1 - 64, 196), 21, A.CREAM, sample=loc_sample)
-    c.text((x0, 226), "INSIDE", 13, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.4)
-    p.key(keypre + "_sub_prev10", x0, 238, 46, 46, "", "left2", A.DIM)
-    p.key(keypre + "_sub_prev", x0 + 52, 238, 46, 46, "", "left", A.CREAM)
-    p.key(keypre + "_sub_next", x1 - 98, 238, 46, 46, "", "right", A.CREAM)
-    p.key(keypre + "_sub_next10", x1 - 46, 238, 46, 46, "", "right2", A.DIM)
-    A.well(c, (x0 + 106, 238, x1 - 106, 284), 9)
-    p.text(keypre + "_sub_name", (x0 + 120, 240, x1 - 116, 282), 20, A.CREAM, sample=sub_sample)
-    c.text((x0 + 26, 298), "-10", 11, A.rgba(A.FAINT), anchor="mm", weight="Bold")
-    c.text((x1 - 23, 298), "+10", 11, A.rgba(A.FAINT), anchor="mm", weight="Bold")
+    small(c, (x0 + 2, 148), "LOCATION")
+    p.key(keypre + "_loc_prev", x0, 160, 46, 42, "", "left", "violet")
+    p.key(keypre + "_loc_next", x1 - 46, 160, 46, 42, "", "right", "violet")
+    A.well(c, (x0 + 54, 160, x1 - 54, 204), 12)
+    A.icon(c, "folder", x0 + 76, 182, 20, A.rgba(A.GOLD))
+    p.text(keypre + "_loc_name", (x0 + 96, 162, x1 - 64, 202), 20, A.GOLD, sample=loc_sample)
+    small(c, (x0 + 2, 230), "INSIDE")
+    p.key(keypre + "_sub_prev10", x0, 242, 46, 42, "", "left2", "purple")
+    p.key(keypre + "_sub_prev", x0 + 52, 242, 46, 42, "", "left", "violet")
+    p.key(keypre + "_sub_next", x1 - 98, 242, 46, 42, "", "right", "violet")
+    p.key(keypre + "_sub_next10", x1 - 46, 242, 46, 42, "", "right2", "purple")
+    A.well(c, (x0 + 106, 242, x1 - 106, 286), 12)
+    p.text(keypre + "_sub_name", (x0 + 120, 244, x1 - 116, 284), 19, A.GOLD, sample=sub_sample)
+    small(c, (x0 + 23, 300), "-10", anchor="mm", px=11)
+    small(c, (x1 - 23, 300), "+10", anchor="mm", px=11)
 
 
 def settings_page():
@@ -367,35 +359,35 @@ def settings_page():
     header(p, status="Library ready")
     c = p.c
     # where samples come from
-    A.card(c, (16, 90, 636, 400), "SAMPLES FROM", accent=A.FAMILY["tonal"])
-    folder_rows(p, 34, 618, "src", A.FAMILY["tonal"], "Default (auto)", "Whole location")
-    c.text((34, 322), "Default (auto) = the Expansions and Samples folders on every drive.", 13, A.rgba(A.DIM), anchor="lm")
-    A.well(c, (34, 342, 400, 388), 9)
-    p.text("lib_info", (50, 344, 390, 386), 20, A.CREAM, sample="2,184 samples")
-    p.key("rescan", 412, 342, 206, 46, "RESCAN", "rescan", A.FAMILY["tonal"], solid=True, px=16)
+    A.card(c, (16, 90, 636, 404), "SAMPLE SOURCE", "blue")
+    folder_rows(p, 34, 618, "src", "Default (auto)", "Whole location")
+    small(c, (36, 324), "DEFAULT (AUTO) = EXPANSIONS + SAMPLES FOLDERS ON EVERY DRIVE", px=11)
+    A.well(c, (34, 342, 400, 386), 12)
+    p.text("lib_info", (50, 344, 390, 384), 20, A.GOLD, sample="2,184 samples")
+    p.key("rescan", 412, 342, 206, 44, "RESCAN", "rescan", "teal", px=16)
     # where kits go
-    A.card(c, (644, 90, 1264, 400), "EXPORT KITS TO", accent=A.GOLD)
-    folder_rows(p, 662, 1246, "exp", A.GOLD, "MPC Documents", "Lucky Dip")
-    c.text((662, 322), "SAMPLES", 13, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.4)
-    p.segments("export_mode", 760, 304, 240, 36, ["COPY INTO KIT", "LINK TO ORIGINALS"], A.GOLD, px=14, sample=0)
-    A.well(c, (662, 352, 1032, 392), 9)
-    c.text((676, 372), "LAST", 11, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.2)
-    p.text("export_name", (714, 354, 1026, 390), 17, A.CREAM, sample="LuckyDip-1112-201544")
-    p.key("export", 1044, 348, 202, 44, "EXPORT KIT", "export", A.GOLD, solid=True, px=16)
+    A.card(c, (644, 90, 1264, 404), "EXPORT FOLDER", "orange")
+    folder_rows(p, 662, 1246, "exp", "MPC Documents", "Lucky Dip")
+    small(c, (664, 326), "SAMPLES")
+    p.segments("export_mode", 760, 306, 240, 44, ["COPY INTO KIT", "LINK ORIGINALS"], "orange", px=14, sample=0)
+    A.well(c, (662, 354, 1032, 392), 12)
+    small(c, (676, 373), "LAST", px=11)
+    p.text("export_name", (714, 355, 1026, 391), 17, A.GOLD, sample="LuckyDip-1112-201544")
+    p.key("export", 1044, 350, 202, 42, "EXPORT KIT", "export", "orange", px=16)
     # how the library is filtered and kits are drawn
-    A.card(c, (16, 412, 1264, 620), "LIBRARY RULES", accent=A.FAMILY["perc"])
-    p.key("skip_loops", 34, 450, 230, 46, "SKIP LOOPS", "loop", A.FAMILY["perc"], toggle=True, sample=True)
-    c.text((280, 465), "Leave out loops: names with \"loop\", a BPM", 14, A.rgba(A.DIM), anchor="lm")
-    c.text((280, 485), "tag (120 bpm) and loop folders.", 14, A.rgba(A.DIM), anchor="lm")
-    p.key("prevent_dup", 660, 450, 230, 46, "NO DUPLICATES", "dup", A.FAMILY["perc"], toggle=True, sample=True)
-    c.text((906, 465), "One sample on one pad only (unless", 14, A.rgba(A.DIM), anchor="lm")
-    c.text((906, 485), "a pad's categories run dry).", 14, A.rgba(A.DIM), anchor="lm")
-    c.text((34, 548), "MAX FILE SIZE", 13, A.rgba(A.FAINT), anchor="lm", weight="Bold", spacing=1.4)
-    p.segments("max_size", 34, 562, 88, 40, ["OFF", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"], A.FAMILY["perc"], px=14, sample=3)
-    c.text((588, 582), "Leave out files bigger than this.", 14, A.rgba(A.DIM), anchor="lm")
-    c.text((588, 600), "RESCAN after changing a rule.", 13, A.rgba(A.FAINT), anchor="lm")
-    p.key("unlock_all", 1032, 560, 214, 44, "UNLOCK ALL PADS", "unlock", A.GOLD, px=14)
-    p.qgroup((22, 440, 1258, 612), ["skip_loops", "prevent_dup", "max_size", "export_mode"])
+    A.card(c, (16, 414, 1264, 620), "LIBRARY", "green")
+    p.key("skip_loops", 34, 462, 230, 44, "SKIP LOOPS", "loop", "mint", toggle=True, sample=True)
+    A.caption(c, (280, 476), "Leave out loops: names with \"loop\", a BPM", 14, anchor="lm", spacing=0.3)
+    A.caption(c, (280, 495), "tag (120 bpm) and loop folders.", 14, anchor="lm", spacing=0.3)
+    p.key("prevent_dup", 660, 462, 230, 44, "NO DUPLICATES", "dup", "mint", toggle=True, sample=True)
+    A.caption(c, (906, 476), "One sample on one pad only (unless", 14, anchor="lm", spacing=0.3)
+    A.caption(c, (906, 495), "a pad's categories run dry).", 14, anchor="lm", spacing=0.3)
+    small(c, (36, 540), "MAX FILE SIZE")
+    p.segments("max_size", 34, 552, 86, 44, ["OFF", "1 MB", "2 MB", "5 MB", "10 MB", "20 MB"], "green", px=14, sample=3)
+    A.caption(c, (588, 568), "Leave out files bigger than this.", 14, anchor="lm", spacing=0.3)
+    A.caption(c, (588, 588), "RESCAN after changing these.", 13, anchor="lm", spacing=0.3)
+    p.key("unlock_all", 1032, 554, 214, 42, "UNLOCK ALL PADS", "unlock", "violet", px=14)
+    p.qgroup((22, 452, 1258, 606), ["skip_loops", "prevent_dup", "max_size", "export_mode"])
     return p
 
 
@@ -454,7 +446,7 @@ def main():
         p.c.image().convert("RGB").save(os.path.join(OUT, bgname))
         kids = [entry("bg", "Image", {"version": 2, "imageType": "Regular", "colour": "0", "image": bgname}, "0 0 1280 628")] + p.kids
         tabs.append({"version": 1, "tabName": p.tab, "fnKeyIndex": p.fn, "fnKeySubIndex": 0,
-                     "componentDefinition": component(kids, background=bgd(hexc(A.INK))), "qlinkBoundsData": p.groups})
+                     "componentDefinition": component(kids, background=bgd(hexc(A.GRAPE))), "qlinkBoundsData": p.groups})
         q = {"Q-Link %d" % n: -1 for n in range(1, 17)}
         for gi, keys in enumerate(p.qrows):
             for i, key in enumerate(keys):
