@@ -5,7 +5,8 @@
 // resampled to the host rate when it is not 44.1 kHz -> float outputs. The engine's render and MIDI paths are lock-free (pad triggers
 // are atomics, sample buffers are swapped atomically), so the audio thread never takes the front end's lock.
 //
-// Parameters: the 0.9.2 wrapper build's 161 in the same order (vst/params.json -> tools/gen_params.py -> params_gen.h).
+// Parameters: the 0.9.2 wrapper build's 161 in the same order (vst/params.json -> tools/gen_params.py -> params_gen.h), then
+// 1.0.0's appended pad1_kind .. pad16_kind, sel_kind (kKind: what each pad holds, for the skin's category pictures).
 //   * values and option lists (kPolled): a host change goes to the engine as its own set_param string; the worker reads them back,
 //     because the engine changes some by itself (the selected pad follows the pad played, its gain follows the selection).
 //     Whole numbers and options settle toward the direction of a Q-Link move, so a small turn moves one step (the 1.x rule).
@@ -196,7 +197,7 @@ public:
         if (index < 0 || index >= kNumParams || !inst_) return;
         if (t_pushing == index) return;          // the host echoing what the worker just told it
         const PSpec& s = g_pspecs[index];
-        if (s.flags & kText) return;             // a readout's counter: nothing to send
+        if (s.flags & (kText | kKind)) return;   // a readout's counter or a kind picture: nothing to send
         hostAt_[index].store(nowMs());
         if (loading_.load()) return;             // an MPC chunk is restoring values: the engine state follows as extra state
         if (s.flags & kMomentary)
@@ -327,6 +328,17 @@ private:
         selMoved_.store(true);
     }
 
+    int kindOf(const char* catKey, const char* nameKey)
+    {
+        static const char* const cats[] = {"kick", "snare", "rim", "clap", "hat", "closed_hat", "open_hat", "tom", "conga", "percussion",
+                                           "crash", "ride", "cymbal", "fx", "glitch", "vox", "bass", "synth", "stab", "chord", "lead", "pad", "other"};
+        char buf[256];
+        if (engineGet(nameKey, buf, sizeof buf) && buf[0] == '!' && buf[1] == ' ') return 24;   // the engine's "missing sample" mark
+        if (!engineGet(catKey, buf, sizeof buf)) return 0;
+        for (int k = 0; k < 23; ++k) if (!std::strcmp(buf, cats[k])) return k + 1;
+        return 0;   // "-": empty
+    }
+
     // ---- worker: momentary releases, everything the engine changes by itself -----------------------------------------------------
     void pushValue(int i, float plain)
     {
@@ -392,6 +404,18 @@ private:
                 if (!moved) ++changed;
             }
         }
+
+        // what each pad holds, for the skin's category pictures (0 empty, 1..23 category, 24 missing)
+        if (full || selChanged)
+            for (int k = 0; k <= 16; ++k)
+            {
+                const int i = kFirstKind + k;
+                char kc[24], kn[24];
+                if (k < 16) { std::snprintf(kc, sizeof kc, "pad%d_cat", k + 1); std::snprintf(kn, sizeof kn, "pad%d_name", k + 1); }
+                else { std::snprintf(kc, sizeof kc, "sel_cat"); std::snprintf(kn, sizeof kn, "sel_name"); }
+                const float v = (float)kindOf(kc, kn);
+                if (v != told_[i]) pushValue(i, v);
+            }
 
         // readouts: every 100 ms (and right after a selection change); a changed text bumps the counter (the host re-reads text when
         // the value moves)

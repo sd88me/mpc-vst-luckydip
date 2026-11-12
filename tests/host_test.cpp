@@ -167,7 +167,7 @@ int main(int argc, char** argv)
         const char want[] = LD_EXPECT_UID;
         CHECK(e->uniqueID == (VstInt32)(((unsigned)want[0] << 24) | ((unsigned)want[1] << 16) | ((unsigned)want[2] << 8) | (unsigned)want[3]),
               "uid %08x", (unsigned)e->uniqueID);
-        CHECK(e->numParams == kNumParams && kNumParams >= 161, "%d params", e->numParams);
+        CHECK(e->numParams == kNumParams && kNumParams == 178, "%d params", e->numParams);
         std::ifstream lk("vst/params.lock");
         std::string k;
         int i = 0, bad = 0;
@@ -183,6 +183,9 @@ int main(int argc, char** argv)
     CHECK(eng(e, "pad1_name") != "(empty)" && eng(e, "pad16_name") != "(empty)", "pads filled: %s / %s", eng(e, "pad1_name").c_str(), eng(e, "pad16_name").c_str());
     CHECK(plainOf(e, idx("generate")) == 0, "GENERATE dropped back to 0");
     CHECK(eng(e, "pad1_cat") == "kick", "pad 1 drew a kick (%s)", eng(e, "pad1_cat").c_str());
+    ld_dbg_tick(e);
+    CHECK(std::lround(plainOf(e, idx("pad1_kind"))) == 1 && std::lround(plainOf(e, idx("pad2_kind"))) == 2, "pad kinds: kick = 1, snare = 2");
+    CHECK(std::lround(plainOf(e, idx("sel_kind"))) == std::lround(plainOf(e, idx("pad1_kind"))), "selected pad kind");
     {
         const int before = (int)plainOf(e, idx("pad1_name"));
         ld_dbg_tick(e);
