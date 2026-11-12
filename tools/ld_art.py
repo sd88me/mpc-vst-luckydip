@@ -81,22 +81,41 @@ class Canvas:
     def __init__(self, w, h, fill=(0, 0, 0, 0)):
         self.w, self.h = w, h
         self.im = Image.new("RGBA", (int(w * S), int(h * S)), fill)
-        self.d = ImageDraw.Draw(self.im, "RGBA")
+        self.d = ImageDraw.Draw(self.im)
+        self._layer = None
 
     def _b(self, box):
         return [v * S for v in box]
 
+    def _dr(self, *cols):
+        """The draw to use: translucent colours go through a layer that is composited (ImageDraw on an RGBA image overwrites
+        alpha instead of blending, which turned the 34 % inner panels solid)."""
+        if any(c is not None and len(c) > 3 and c[3] < 255 for c in cols):
+            self._layer = Image.new("RGBA", self.im.size, (0, 0, 0, 0))
+            return ImageDraw.Draw(self._layer)
+        self._layer = None
+        return self.d
+
+    def _done(self):
+        if self._layer is not None:
+            self.im.alpha_composite(self._layer)
+            self._layer = None
+
     def rect(self, box, r=0, fill=None, outline=None, width=1):
-        self.d.rounded_rectangle(self._b(box), r * S, fill=fill, outline=outline, width=int(width * S))
+        self._dr(fill, outline).rounded_rectangle(self._b(box), r * S, fill=fill, outline=outline, width=int(width * S))
+        self._done()
 
     def ellipse(self, box, fill=None, outline=None, width=1):
-        self.d.ellipse(self._b(box), fill=fill, outline=outline, width=int(width * S))
+        self._dr(fill, outline).ellipse(self._b(box), fill=fill, outline=outline, width=int(width * S))
+        self._done()
 
     def poly(self, pts, fill=None, outline=None):
-        self.d.polygon([(x * S, y * S) for x, y in pts], fill=fill, outline=outline)
+        self._dr(fill, outline).polygon([(x * S, y * S) for x, y in pts], fill=fill, outline=outline)
+        self._done()
 
     def line(self, pts, fill, width=1):
-        self.d.line([(x * S, y * S) for x, y in pts], fill=fill, width=int(width * S), joint="curve")
+        self._dr(fill).line([(x * S, y * S) for x, y in pts], fill=fill, width=int(width * S), joint="curve")
+        self._done()
 
     def text(self, xy, s, px, fill, anchor="mm", weight="Bold", spacing=0, stroke=None, sw=0):
         """Text; spacing = letter spacing in px; stroke = an outline colour (the 0.9 captions: white with a dark outline)."""
@@ -286,10 +305,11 @@ def key(w, h, cap="", icon_name=None, candy="pink", state="off", px=15, toggle=F
     c.vgrad((1.5, 1.5 + dy, w - 1.5, h - 0.5 + dy), top, bot, r)
     if lit:   # gloss over the top half
         c.vgrad((5, 3 + dy, w - 5, 3 + dy + h * 0.42), WHITE, mix(top, WHITE, 0.4), r * 0.8, alpha=70)
-    c.rect((1.5, 1.5 + dy, w - 1.5, h - 0.5 + dy), r, outline=rgba(WHITE, 255 if lit else 170), width=2.5)
+    rim = WHITE if lit else mix(CANDY[candy][0], WHITE, 0.15)
+    c.rect((1.5, 1.5 + dy, w - 1.5, h - 0.5 + dy), r, outline=rgba(rim, 255 if lit else 200), width=2.5)
     cy = 1 + dy + h / 2
-    fill = WHITE if lit else LAVENDER
-    icol = rgba(WHITE) if lit else rgba(LAV_DIM)
+    fill = WHITE if lit else mix(CANDY[candy][0], LAVENDER, 0.45)
+    icol = rgba(WHITE) if lit else rgba(mix(CANDY[candy][0], LAV_DIM, 0.4))
     if icon_name and cap:
         iw = px * 1.1
         tw = c.textw(cap, px, spacing=px * 0.1)
