@@ -428,14 +428,42 @@ struct Inst {
         cfg.export_dir = ep.empty() ? def_export : ep;
         cfg.scan.max_bytes = (int64_t)SIZE_MB[size_idx] * 1024 * 1024;
     }
+    /* A location as a person reads it: "<drive> / <path>" (Internal = the Live III's drive, Internal SD = the Force's, a card or
+     * stick by its name); a long one keeps its end. */
     static std::string folder_label(const std::string &p, const char *dflt, size_t max) {
         if (p.empty()) return dflt;
-        std::string s = p;
-        if (s.compare(0, 7, "/media/") == 0) s = s.substr(7);
-        else if (s.compare(0, 6, "/nvme/") == 0) s = s.substr(6);     /* the Live III's drive: just the folder name */
-        else if (s.compare(0, 1, "/") == 0) s = s.substr(1);
-        if (s.size() > max) s = "~" + s.substr(s.size() - (max - 1));
-        return s;
+        static const char *const pre[][2] = {{"/nvme", "Internal"}, {"/media/az01-internal-sd", "Internal SD"}, {"/sdcard", "SD card"}};
+        std::string drive, rest;
+        for (size_t i = 0; i < sizeof pre / sizeof *pre && drive.empty(); i++) {
+            size_t n = strlen(pre[i][0]);
+            if (p.compare(0, n, pre[i][0]) == 0 && (p.size() == n || p[n] == '/')) { drive = pre[i][1]; rest = p.size() > n ? p.substr(n + 1) : ""; }
+        }
+        if (drive.empty() && p.compare(0, 7, "/media/") == 0) {
+            size_t e = p.find('/', 7);
+            drive = p.substr(7, e == std::string::npos ? std::string::npos : e - 7);
+            rest = e == std::string::npos ? "" : p.substr(e + 1);
+        }
+        if (drive.empty()) { drive = ""; rest = p[0] == '/' ? p.substr(1) : p; }
+        std::vector<std::string> parts;
+        if (!drive.empty()) parts.push_back(drive);
+        for (size_t a = 0; a <= rest.size();) {
+            size_t b = rest.find('/', a);
+            if (b == std::string::npos) b = rest.size();
+            if (b > a) parts.push_back(rest.substr(a, b - a));
+            a = b + 1;
+        }
+        std::string s;
+        for (size_t i = 0; i < parts.size(); i++) s += (i ? " / " : "") + parts[i];
+        if (s.size() <= max || parts.size() < 2) return s.size() <= max ? s : "~" + s.substr(s.size() - (max - 1));
+        /* too long: the drive, "...", and as many of the deepest folders as fit */
+        std::string tail = parts.back();
+        for (size_t i = parts.size() - 1; i-- > 1;) {
+            std::string t = parts[i] + " / " + tail;
+            if (parts[0].size() + 7 + t.size() > max) break;
+            tail = t;
+        }
+        s = parts[0] + " / ... / " + tail;
+        return s.size() <= max ? s : "~" + s.substr(s.size() - (max - 1));
     }
     static std::string sub_label(const FolderSel &f) {
         if (f.loc <= 0) return "-";
@@ -453,7 +481,7 @@ struct Inst {
     std::string folder_item_locked(int which, int i) {
         FolderSel &f = which < 2 ? src : exp;
         if (i < 0 || i >= folder_count_locked(which)) return "";
-        if (which % 2 == 0) return folder_label(f.locs[i], "Default (auto)", 40);
+        if (which % 2 == 0) return folder_label(f.locs[i], "Default (auto)", 34);
         return i == 0 ? std::string("(whole folder)") : base_name(f.subs[f.loc][i]);
     }
     void pick_folder(int which, int i) {
@@ -850,8 +878,8 @@ int e_get_param(void *h, const char *key, char *buf, int n) {
         const char *c2 = strchr(key + 8, ':');
         return c2 ? put(buf, n, in->folder_item_locked(atoi(key + 8) & 3, atoi(c2 + 1))) : 0;
     }
-    if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 23));
-    if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 23));
+    if (!strcmp(key, "src_loc_name")) return put(buf, n, Inst::folder_label(in->src.locs[in->src.loc], "Default (auto)", 44));
+    if (!strcmp(key, "exp_loc_name")) return put(buf, n, Inst::folder_label(in->exp.locs[in->exp.loc], "Default (auto)", 44));
     if (!strcmp(key, "src_sub_name")) return put(buf, n, Inst::sub_label(in->src));
     if (!strcmp(key, "exp_sub_name")) return put(buf, n, Inst::sub_label(in->exp));
     if (!strncmp(key, "src_loc_", 8) || !strncmp(key, "src_sub_", 8) || !strncmp(key, "exp_loc_", 8) || !strncmp(key, "exp_sub_", 8)) return put(buf, n, "0");   /* triggers */
