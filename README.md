@@ -62,6 +62,48 @@ Enhancements must have External Plugin Support on).
 **Upgrading from 0.9:** install over it as above. Your projects, favourites and rejects carry over. Remove Lucky Dip from every
 track (or reopen the project) after updating: MPC keeps a plugin loaded while any instance of it exists.
 
+## Backing up your favourites and sounds
+
+Your favourites and your own files are kept in the plugin folder on the MPC, not in your projects (a project keeps only the sound its
+track uses). Back them up before you update the plugin or MPC OS, reset the device, or move to another MPC. These are the files to keep,
+inside the plugin folder `sd88me - VST - Lucky Dip`:
+
+| File or folder | What it holds |
+|---|---|
+| `luckydip/` | your favourites and rejects (`prefs.txt`), your `luckydip.conf` and kits saved there |
+
+### Where the plugin folder is
+It is in `VST2 Plugins` on one of the MPC's drives, or in a Synths folder (`/sdcard/Synths`, or `/nvme/Synths` on a Live III),
+depending on how Lucky Dip was installed. Over SSH (root access), this prints its path:
+
+```bash
+ssh root@<device-ip> 'find /sdcard /nvme /media -maxdepth 3 -type d -name "sd88me - VST - Lucky Dip" 2>/dev/null'
+```
+
+### Backing up
+- **The plugin folder is on an SD card or USB drive:** plug the drive into a computer and copy the files above to it.
+- **Over SSH**, from a computer: this copies the whole plugin folder into one file, `luckydip-backup.tar`. Put the folder that holds the
+  plugin folder (the path above without its last part) in place of `<parent folder>`:
+
+  ```bash
+  ssh root@<device-ip> 'cd "<parent folder>" && tar cf - "sd88me - VST - Lucky Dip"' > luckydip-backup.tar
+  ```
+
+### Restoring
+Install Lucky Dip first (on the new device, or after the reset or update), then put back only the files above. Don't copy the whole
+old folder over the new one: that would put the old version of the plugin back too.
+
+- **From a drive:** copy the files back to the same places in the new plugin folder.
+- **Over SSH:** unpack the backup on your computer and send the files back. List only the ones your backup has, and put the new
+  plugin folder's path (found as above) in place of `<plugin folder>`:
+
+  ```bash
+  mkdir luckydip-backup && tar xf luckydip-backup.tar -C luckydip-backup
+  tar cf - -C "luckydip-backup/sd88me - VST - Lucky Dip" "luckydip" | ssh root@<device-ip> 'cd "<plugin folder>" && tar xf -'
+  ```
+
+Then remove Lucky Dip from its tracks and add it again (or reopen the project), so it reads the restored files.
+
 ## Quick start
 1. Add a **Lucky Dip** track. The first time, it scans your drives in the background; the banner shows the sample count when
    it's done.
