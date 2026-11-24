@@ -27,7 +27,7 @@ PY
   printf '<PLUGIN name="Lucky Dip" descriptiveName="Lucky Dip" format="VST" category="Synth" manufacturer="sd88me" version="%s" file="lucky_dip.so" uid="4c6b4470" isInstrument="1" fileTime="0" infoUpdateTime="0" numInputs="0" numOutputs="2" isShell="0"/>\n' "$VER" > "$st/entry.xml"
   python3 "$MPC_VST/tools/release.py" --so "$st/lucky_dip.so" --skin "$st/$DIR" --entry "$st/entry.xml" --version "$VER" \
     --user-data luckydip \
-    --repo sd88me/mpc-vst-luckydip --license MIT --id lucky-dip \
+    --repo sd88me/mpc-vst-luckydip --license GPL-3.0-or-later --id lucky-dip \
     --about "Random drum-kit builder: scans your sample folders, fills 16 pads at random, lock / reroll / export the kit as an MPC drum program; native MPC screen." \
     -o "$st/dist"
   z=$(ls "$st/dist"/*.zip); cp "$z" "$out/Lucky-Dip-$VER-mpc-$cpu.zip"

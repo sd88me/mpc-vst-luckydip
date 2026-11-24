@@ -203,4 +203,4 @@ The kit-building engine (sample classification, seeded random assignment, loudne
 [force-kit-builder](https://github.com/sd88me/force-kit-builder), which Lucky Dip follows. Screen text uses Titillium Web (SIL
 Open Font License, `tools/fonts/OFL.txt`). Built on [mpc-vst-plugins](https://github.com/sd88me/mpc-vst-plugins).
 
-MIT licensed, see `LICENSE`.
+Free software under the GNU General Public License, version 3 or later: see `LICENSE`. It was MIT before 2026-11-24; code contributed under MIT keeps that notice (`LICENSE-MIT`).
