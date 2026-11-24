@@ -12,5 +12,5 @@
   "description": "A random drum-kit builder: scans your sample folders, fills 16 pads at random, lets you lock, reroll and export the kit as an MPC drum program.",
   "author": "sd88me",
   "url": "https://github.com/sd88me/mpc-vst-luckydip",
-  "license": "MIT"
+  "license": "GPL-3.0-or-later"
 }
