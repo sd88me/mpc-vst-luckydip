@@ -23,5 +23,7 @@
   "device": "Akai Force",
   "firmware": "MPC OS 3.9.1",
   "date": "2026-11-12"
- }
+ },
+  {"version": "1.0.1", "device": "Akai MPC Live III (Gen2)", "firmware": "3.10", "date": "2026-11-24",
+    "note": "Release zip installed on the unit from the draft release; loads, skin and sound checked."}
 ]
